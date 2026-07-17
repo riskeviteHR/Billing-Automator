@@ -12,7 +12,7 @@ This workspace contains a local-first invoice tool built from three pieces:
 2. Each company has fully isolated data under `~/Desktop/Invoices Utility/Companies/<company-id>/`: its own `Invoice_Database.xlsx`, `Invoices raised/` PDFs, and `Whatsapp integration/` exports. The Companies button in the dashboard switches or creates companies.
 3. The frontend loads the active company's profile, clients, and invoices from the backend.
 4. New invoices are saved into the company's Excel workbook and rendered to PDF with Puppeteer.
-5. GST and Non-GST invoices use independent numbering series (`GST/YY-MM/NNN` and `INV/YY-MM/NNN`), with separate dashboard tabs for each type. Bulk generation requires all selected tasks to share the same GST setting.
+5. GST and Non-GST invoices use independent numbering series (`GST/YY-MM/NNN` and `INV/YY-MM/NNN`), with separate dashboard tabs for each type (labeled Primary Bills / Secondary Bills in the UI). Bulk generation requires all selected tasks to share the same GST setting.
 6. PDFs are written to `Companies/<company-id>/Invoices raised/<Month Year>/`.
 7. Batch actions generate Excel files for WhatsApp sends and reminder workflows in the active company's folder.
 
@@ -36,3 +36,7 @@ This workspace contains a local-first invoice tool built from three pieces:
 - `npm start`: run the Express app in a browser
 - `npm run dev`: launch the Electron desktop shell
 - `npm run build`: package the Electron app into `dist/`
+
+## Releases
+
+Packaged installers are published to this repository's [Releases](../../releases) page.
