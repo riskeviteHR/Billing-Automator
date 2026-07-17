@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light only">
+  <title>Professional Invoice Utility - Management Tool</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <script src="lib/qrious.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="license-overlay" class="license-overlay hidden">
+    <div class="license-card">
+      <h2>Activation Required</h2>
+      <p>Please enter your license key to continue.</p>
+      <label>License Key</label>
+      <input type="text" id="license-input" placeholder="INV-XXXX-XXXX">
+      <button id="activate-btn" class="btn btn-primary wide">Activate Now</button>
+      <div id="license-error" class="license-error hidden"></div>
+      <div class="machine-row">Machine ID: <span id="machine-id-display">...</span></div>
+    </div>
+  </div>
+
+  <div id="login-overlay" class="license-overlay hidden">
+    <div class="license-card">
+      <h2>Passkey Authentication</h2>
+      <p>Enter your passkey to access the admin panel.</p>
+      <form id="login-form">
+        <label>Passkey</label>
+        <input type="password" id="login-passkey" autocomplete="current-password" required autofocus>
+        <button type="submit" class="btn btn-primary wide">Unlock</button>
+        <div id="login-error" class="license-error hidden"></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="app">
+    <aside id="sidebar" class="hidden">
+      <div class="sidebar-header">
+        <span class="sidebar-header-title"><span class="accent">&#9679;</span> <span id="sidebar-firm">Invoice Utility</span></span>
+        <button type="button" id="sidebar-collapse-btn" class="sidebar-collapse-btn" onclick="toggleSidebar()" title="Hide sidebar" aria-label="Hide sidebar">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+      </div>
+      <button type="button" id="theme-toggle" class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light and dark mode">
+        <span id="theme-toggle-icon">🌙</span>
+        <span id="theme-toggle-label">Dark Mode</span>
+      </button>
+      <button type="button" class="sidebar-section sidebar-section-btn" data-nav="dashboard" onclick="navGst(document.getElementById('bills-filter').value)">Bills</button>
+      <div class="bills-filter">
+        <select id="bills-filter" onchange="navGst(this.value)">
+          <option value="all">All Bills</option>
+          <option value="gst">Primary Bills</option>
+          <option value="nongst">Secondary Bills</option>
+        </select>
+      </div>
+      <div class="time-filter">
+        <label for="time-filter">Period</label>
+        <select id="time-filter" onchange="setTimeFilter()">
+          <option value="all">All Time</option>
+          <option value="month">Current Month</option>
+          <option value="prevmonth">Previous Month</option>
+          <option value="quarter">This Quarter</option>
+          <option value="fy">This Financial Year</option>
+          <option value="year">This Calendar Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        <div id="time-custom" class="hidden">
+          <input type="date" id="time-from" onchange="setTimeFilter()">
+          <input type="date" id="time-to" onchange="setTimeFilter()">
+        </div>
+      </div>
+      <div class="sidebar-section">Navigation</div>
+      <button type="button" class="side-item" data-nav="reports" onclick="showReportsView()">Reports</button>
+      <button type="button" class="side-item" data-nav="reminders" onclick="showRemindersView()">Auto Reminders</button>
+      <button type="button" class="side-item" data-nav="vouchers" onclick="showVouchersView()">Vouchers</button>
+      <button type="button" class="side-item" data-nav="clients" onclick="showClientsView()">Clients</button>
+      <button type="button" class="side-item" onclick="showCompanyModal()">Companies</button>
+      <button type="button" class="side-item" data-nav="help" onclick="showHelpView()">Help &amp; Version</button>
+      <div class="sidebar-footer">
+        <button type="button" class="side-item" onclick="showPasswordModal()">Change Passkey</button>
+        <button type="button" class="side-item side-logout" onclick="logout()">Logout</button>
+      </div>
+    </aside>
+    <button type="button" id="sidebar-expand-btn" class="sidebar-expand-btn hidden" onclick="toggleSidebar()" title="Show sidebar" aria-label="Show sidebar">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </button>
+    <div id="main-content">
+    <div id="onboarding-view" class="view hidden">
+      <div class="glass-card onboarding-card">
+        <h1>Welcome to <span class="accent">Invoice Utility</span></h1>
+        <p>Let's set up your organisation details to get started.</p>
+        <form id="firm-details-form">
+          <div class="form-grid">
+            <div class="form-group full"><label>Organisation Name</label><input type="text" id="firm_name" required></div>
+            <div class="form-group"><label>Owner Name</label><input type="text" id="partner_name" required></div>
+            <div class="form-group"><label>Phone Number</label><input type="text" id="phone" required></div>
+            <div class="form-group"><label>Email Address</label><input type="email" id="email" required></div>
+            <div class="form-group"><label>GSTN</label><input type="text" id="gstn"></div>
+            <div class="form-group"><label>UPI ID</label><input type="text" id="upi_id_setup"></div>
+            <div class="form-group"><label>Bank Name</label><input type="text" id="bank_name" placeholder="e.g. State Bank of India"></div>
+            <div class="form-group"><label>Bank Account Number</label><input type="text" id="bank_account" placeholder="Account number"></div>
+            <div class="form-group"><label>Bank IFSC Code</label><input type="text" id="bank_ifsc" placeholder="e.g. SBIN0001234"></div>
+            <div class="form-group full"><label>Organisation Logo</label><input type="file" id="logo" accept="image/*"><div id="logo-preview"></div></div>
+          </div>
+          <button type="submit" class="btn btn-primary">Save & Continue</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="startup-view" class="view hidden">
+      <div class="glass-card startup-card">
+        <h1 id="startup-title">Starting Invoice Utility</h1>
+        <p id="startup-message" class="subtle">Connecting to the local application server...</p>
+      </div>
+    </div>
+
+    <div id="clients-view" class="view hidden">
+      <header class="page-header">
+        <div><h2>Client Management</h2><p>Add or edit your clients here.</p></div>
+        <div class="toolbar compact"><input id="client-filter" class="client-filter-input" placeholder="Search clients" oninput="renderClientsTable()"><button class="btn btn-secondary" onclick="showView('dashboard-view')">Back</button><button class="btn btn-primary" onclick="showAddClientModal()">+ Add Client</button></div>
+      </header>
+      <div class="glass-card"><div class="table-scroll"><table><thead><tr><th>Name</th><th>Email / Phone</th><th>GSTN</th><th>Address</th><th>Status</th><th>Reminders</th><th>Actions</th></tr></thead><tbody id="clients-list"></tbody></table></div></div>
+    </div>
+
+    <div id="dashboard-view" class="view hidden">
+      <header class="page-header dashboard-header">
+        <div><h2 id="display-firm-name">Organisation Name</h2><p id="display-partner-name">Owner Name</p></div>
+        <div class="toolbar"><div class="dropdown-filter dashboard-company-filter"><select id="dashboard-company-select" onchange="switchCompany(this.value)"></select></div><button type="button" class="bell-btn" onclick="showSettings()" title="Settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button type="button" class="bell-btn" onclick="showRemindersView()" title="Auto Reminders"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span id="bell-count" class="bell-count hidden">0</span></button><button class="btn btn-secondary" onclick="openInvoicesFolder()">Open Folder</button><button class="btn btn-secondary" onclick="showBulkUploadModal()">Bulk Upload</button><button class="btn btn-primary" onclick="showAddTaskModal()">+ Add Task</button></div>
+      </header>
+      <main>
+        <div class="billboard-section" id="billboard-section">
+          <div class="billboard-row">
+            <button type="button" class="billboard-toggle-chip" id="billboard-toggle-btn" onclick="toggleBillboardCollapse()" title="Show categories">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+              <span>Categories</span>
+            </button>
+            <div class="billboard" id="billboard"></div>
+          </div>
+        </div>
+        <div class="stats-bar">
+          <div class="stat-item stat-total"><div class="stat-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 3v2a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3"/><path d="M8 11h8M8 15h5"/></svg></div><div class="stat-body"><span class="label">Total Tasks</span><span class="value" id="stat-total">0</span></div></div>
+          <div class="stat-item stat-pending"><div class="stat-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div><div class="stat-body"><span class="label">Invoice Pending</span><span class="value" id="stat-open">0</span></div></div>
+          <div class="stat-item stat-generated"><div class="stat-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m9 15 2 2 4-4"/></svg></div><div class="stat-body"><span class="label">Invoice Generated</span><span class="value" id="stat-completed">0</span></div></div>
+          <div class="stat-item stat-outstanding"><div class="stat-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12V8H6a2 2 0 0 1 0-4h12v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4h-4Z"/></svg></div><div class="stat-body"><span class="label">Outstanding Amount</span><span class="value" id="stat-outstanding">₹0</span></div></div>
+        </div>
+        <div class="glass-card">
+          <div class="table-header-flex">
+            <div><h3>Task Dashboard</h3><p class="subtle">Tasks stay pending until invoice generation is triggered.</p></div>
+            <div class="toolbar compact"><button class="btn btn-outline btn-batch-generate" onclick="batchProcess('generate')">Generate Selected</button><button class="btn btn-outline" onclick="batchProcessSeparate()">Generate Separate</button><button class="btn btn-outline btn-batch-send" onclick="batchProcess('send')">Invoice <svg viewBox="0 0 24 24" width="18" height="18" fill="#25D366" aria-hidden="true" focusable="false"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 0 0 1.51 5.26l-.999 3.648 3.978-1.99zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg></button><button class="btn btn-outline btn-batch-reminder" onclick="batchProcess('reminder')">Reminder <svg viewBox="0 0 24 24" width="18" height="18" fill="#25D366" aria-hidden="true" focusable="false"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 0 0 1.51 5.26l-.999 3.648 3.978-1.99zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg></button></div>
+          </div>
+          <div class="filter-bar">
+            <input type="text" id="filter-search" class="filter-search" oninput="applyFilters()" placeholder="Search client or details">
+            <label class="filter-field">From <input type="date" id="filter-from" onchange="applyFilters()"></label>
+            <label class="filter-field">To <input type="date" id="filter-to" onchange="applyFilters()"></label>
+            <select id="filter-inv-status" onchange="applyFilters()"><option value="">All Invoice Status</option><option value="Invoice Pending">Invoice Pending</option><option value="Invoice Generated">Invoice Generated</option></select>
+            <select id="filter-pay-status" onchange="applyFilters()"><option value="">All Payment Status</option><option value="Payment Pending">Payment Pending</option><option value="Payment Received">Payment Received</option></select>
+            <button type="button" class="btn btn-outline btn-sm" onclick="resetFilters()">Reset</button>
+          </div>
+          <div class="table-scroll">
+            <table id="task-table">
+              <colgroup><col class="col-select"><col class="col-client"><col class="col-details"><col class="col-date"><col class="col-amount"><col class="col-invoice"><col class="col-invstatus"><col class="col-paystatus"><col class="col-action"></colgroup>
+              <thead>
+                <tr>
+                  <th class="col-select"><label class="select-all"><input type="checkbox" id="select-all-rows" onclick="toggleSelectAll(this)"></label></th>
+                  <th>Client</th><th>Details</th><th>Date</th><th>Amount</th><th>Invoice No.</th><th>Invoice Status</th><th>Payment Status</th><th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="task-list"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div id="reports-view" class="view hidden">
+      <header class="page-header">
+        <div><h2>Reports</h2><p class="subtle">Generated invoices only. Filter, view and download.</p></div>
+      </header>
+      <div class="glass-card">
+        <div class="invoice-tabs">
+          <button type="button" class="tab-btn active" data-report="sales" onclick="setReportType('sales')">Sales</button>
+          <button type="button" class="tab-btn" data-report="outstanding" onclick="setReportType('outstanding')">Outstanding</button>
+          <button type="button" class="tab-btn" data-report="ledger" onclick="setReportType('ledger')">Party Ledger</button>
+          <button type="button" class="tab-btn" data-report="gst" onclick="setReportType('gst')">Primary Bills</button>
+          <button type="button" class="tab-btn" data-report="nongst" onclick="setReportType('nongst')">Secondary Bills</button>
+        </div>
+        <div class="report-filters">
+          <label>From <input type="date" id="report-from" onchange="runReport()"></label>
+          <label>To <input type="date" id="report-to" onchange="runReport()"></label>
+          <span id="report-client-wrap" class="hidden"><label>Client <select id="report-client" onchange="runReport()"><option value="">-- Select Client --</option></select></label></span>
+          <button type="button" class="btn btn-outline" onclick="downloadReport('xlsx')">Download Excel</button>
+          <button type="button" class="btn btn-outline" onclick="downloadReport('pdf')">Download PDF</button>
+          <button type="button" id="report-tally-btn" class="btn btn-outline" onclick="downloadReport('tally')">Export to Tally (XML)</button>
+        </div>
+        <div class="table-scroll">
+          <table id="report-table"><thead></thead><tbody></tbody><tfoot></tfoot></table>
+        </div>
+        <p id="report-empty" class="subtle hidden">No data for the selected filters.</p>
+      </div>
+    </div>
+
+    <div id="reminders-view" class="view hidden">
+      <header class="page-header">
+        <div><h2>Auto Reminders</h2><p class="subtle">Fully automatic WhatsApp payment reminders — first reminder 3 days after the due date, repeating every 3 days until paid.</p></div>
+        <div class="toolbar compact">
+          <label class="switch-label reminder-master-toggle">
+            <span>Automatic Reminders</span>
+            <label class="switch"><input type="checkbox" id="auto-reminders-global" checked onchange="toggleGlobalReminders(this.checked)"><span class="slider round"></span></label>
+          </label>
+        </div>
+      </header>
+
+      <div class="glass-card">
+        <div class="table-header-flex">
+          <div><h3>Outstanding Invoices</h3><p class="subtle">Reminders send automatically unless a toggle below is off.</p></div>
+          <div class="toolbar compact reminder-filters">
+            <div class="dropdown-filter">
+              <select id="reminder-filter-billtype" onchange="fetchReminders()">
+                <option value="all">All Bills</option>
+                <option value="gst">Primary Bills</option>
+                <option value="nongst">Secondary Bills</option>
+              </select>
+            </div>
+            <div class="dropdown-filter">
+              <select id="reminder-filter-company" onchange="fetchReminders()">
+                <option value="all">All Companies</option>
+              </select>
+            </div>
+            <input type="search" id="reminder-search" class="client-filter-input" placeholder="Search invoice or client" oninput="renderReminders()">
+            <button class="btn btn-outline btn-sm" onclick="fetchReminders()">Refresh</button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table id="reminders-table"><thead><tr><th>Invoice No.</th><th>Client</th><th>Company</th><th class="num">Amount Due</th><th>Last Reminder</th><th>Next Reminder</th><th>Status</th><th>Reminder</th></tr></thead><tbody id="reminders-list"></tbody></table>
+        </div>
+        <p id="reminders-empty" class="subtle hidden">No unpaid invoices to remind about.</p>
+      </div>
+
+      <div class="glass-card">
+        <div class="table-header-flex"><div><h3>Reminder History</h3><p class="subtle">Every automatic reminder attempt, across companies.</p></div><div class="toolbar compact"><button class="btn btn-outline btn-sm" onclick="fetchReminderHistory()">Refresh</button></div></div>
+        <div class="table-scroll">
+          <table id="reminder-history-table"><thead><tr><th>Date/Time</th><th>Client</th><th>Company</th><th>Invoice No.</th><th>Channel</th><th>Status</th><th>Failure Reason</th></tr></thead><tbody id="reminder-history-list"></tbody></table>
+        </div>
+        <p id="reminder-history-empty" class="subtle hidden">No reminders sent yet.</p>
+      </div>
+    </div>
+
+    <div id="help-view" class="view hidden">
+      <header class="page-header">
+        <div><h2>Help &amp; User Guide</h2><p class="subtle">How the software works, plus every keyboard shortcut.</p></div>
+      </header>
+      <div class="glass-card updates-card">
+        <div class="table-header-flex">
+          <div><h3>App Updates</h3><p class="subtle">Version <span id="app-version">—</span></p></div>
+          <div class="toolbar compact">
+            <button type="button" class="btn btn-outline btn-sm" id="check-update-btn" onclick="checkForUpdates()">Check for Updates</button>
+            <button type="button" class="btn btn-primary btn-sm hidden" id="restart-update-btn" onclick="restartAndUpdate()">Restart and Update</button>
+          </div>
+        </div>
+        <p id="update-status" class="subtle">Updates download automatically in the background while the app is open.</p>
+        <div id="update-progress-wrap" class="update-progress-wrap hidden">
+          <div class="update-progress-bar"><div id="update-progress-fill" class="update-progress-fill" style="width:0%"></div></div>
+          <span id="update-progress-label" class="update-progress-label">0%</span>
+        </div>
+      </div>
+      <div class="glass-card help-card">
+        <h3>What this software does</h3>
+        <p>A local, offline invoicing &amp; accounting tool for CAs and small firms. Everything is saved on this computer under <strong>Desktop → Invoices Utility</strong>; nothing is uploaded to the cloud. You can run multiple companies, each with its own isolated data.</p>
+        <h3>Getting started</h3>
+        <ul class="help-list">
+          <li><strong>Login:</strong> the app is protected by a passkey (default <code>admin123</code>) — change it from <em>Change Passkey</em> in the sidebar.</li>
+          <li><strong>Companies:</strong> create and switch between firms; each keeps separate clients, invoices, vouchers and reports.</li>
+          <li><strong>Clients:</strong> add parties with name, contact, GSTIN, and mandatory City &amp; Pincode.</li>
+        </ul>
+        <h3>Day-to-day work</h3>
+        <ul class="help-list">
+          <li><strong>Tasks &amp; Invoices:</strong> add a task (client + line items), then <em>Generate</em> its invoice. Primary Bills (GST) and Secondary Bills (Non-GST) use separate numbering series (switch between them from the Bills dropdown in the sidebar). Use <em>Generate Separate</em> to make one invoice per selected row.</li>
+          <li><strong>Receipt Entry / Vouchers:</strong> record payments against an invoice, or as an on-account advance. Extra money auto-adjusts to the party's other pending invoices, then becomes an advance.</li>
+          <li><strong>Reports:</strong> Sales, Outstanding, Party Ledger, Primary &amp; Secondary Bills — view on screen or download as Excel, PDF, or <strong>Tally XML</strong>.</li>
+          <li><strong>Auto Reminders:</strong> fully automatic — the first WhatsApp payment reminder sends 3 days after an invoice's due date, then repeats every 3 days until it's paid. Turn it off globally, per client, or per invoice any time; reminders stop the moment an invoice is marked paid. Runs on a backend schedule, so it keeps working even when the app is minimized or closed.</li>
+          <li><strong>Settings:</strong> click the gear icon on the dashboard (next to the reminders bell) to edit your organisation details.</li>
+          <li><strong>Bulk Upload:</strong> import many tasks at once from an Excel template.</li>
+          <li><strong>Delete:</strong> remove a task, client, or voucher — you'll always be asked to confirm. A client with existing tasks can't be deleted until its tasks are removed; deleting a voucher reverses the payment it applied.</li>
+          <li><strong>Dark mode:</strong> toggle from the top of the sidebar.</li>
+        </ul>
+        <h3>Keyboard shortcuts</h3>
+        <div class="table-scroll">
+          <table class="help-shortcuts">
+            <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New entry (task / client / voucher — depends on the current screen)</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td><td>New task</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></td><td>New client</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></td><td>New voucher</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Save / Save &amp; submit the open form</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>Edit the selected row</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd> / <kbd>Delete</kbd></td><td>Delete the selected row (with confirmation)</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Focus the search box</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Open / print the selected invoice PDF</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>I</kbd></td><td>Generate invoice for selected rows</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>R</kbd></td><td>Send reminder for selected rows / open Reminders</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></td><td>Export current report to Excel</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>Close or cancel the open dialog</td></tr>
+              <tr><td><kbd>F5</kbd></td><td>Refresh the current screen's data</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="vouchers-view" class="view hidden">
+      <header class="page-header">
+        <div><h2>Vouchers</h2><p class="subtle">Record receipts against invoices or as advances.</p></div>
+        <div class="toolbar compact"><button class="btn btn-primary" onclick="showVoucherModal()">+ New Voucher</button></div>
+      </header>
+      <div id="advances-panel" class="advances-panel hidden"></div>
+      <div class="voucher-search-wrap">
+        <input id="voucher-search" class="voucher-search-input" type="search" placeholder="Search vouchers by date, party, amount, or reference" oninput="setVoucherSearch(this.value)">
+      </div>
+      <div class="glass-card"><div class="table-scroll"><table><thead><tr><th>Voucher No</th><th>Date</th><th>Party</th><th>Amount</th><th>Mode</th><th>Reference</th><th>Adjustment</th><th>Action</th></tr></thead><tbody id="vouchers-list"></tbody></table></div><p id="vouchers-empty" class="subtle hidden">No vouchers recorded yet.</p></div>
+    </div>
+    </div>
+
+    <div id="voucher-modal" class="modal hidden">
+      <div class="modal-content glass-card">
+        <div class="modal-header"><h3>New Voucher</h3><button type="button" class="close-btn" onclick="closeVoucherModal()">&times;</button></div>
+        <form id="voucher-form">
+          <div class="form-grid">
+            <div class="form-group"><label for="v_date">Date</label><input type="date" id="v_date" required></div>
+            <div class="form-group"><label for="v_party">Debtor / Party</label><select id="v_party" required onchange="onVoucherPartyChange()"><option value="">-- Select Party --</option></select></div>
+            <div class="form-group"><label for="v_amount">Amount</label><input type="number" id="v_amount" step="0.01" min="0" required></div>
+            <div class="form-group"><label for="v_mode">Payment Mode</label><select id="v_mode"><option>Cash</option><option>Bank</option></select></div>
+            <div class="form-group full">
+              <label>Bill Adjustment</label>
+              <div class="adjust-toggle">
+                <label><input type="radio" name="v_adjust" value="invoice" checked onchange="toggleAdjustmentMode()"> Adjustment Reference (against invoice)</label>
+                <label><input type="radio" name="v_adjust" value="advance" onchange="toggleAdjustmentMode()"> New Reference (advance)</label>
+              </div>
+            </div>
+            <div class="form-group full" id="v_invoice_wrap"><label for="v_invoice">Invoice</label><select id="v_invoice"><option value="">-- Select Invoice --</option></select><p id="v_invoice_hint" class="subtle hidden">No outstanding invoices for this party. Record it as an advance instead.</p></div>
+            <div class="form-group full"><label for="v_reference">Reference Number</label><input type="text" id="v_reference" placeholder="Cheque / UPI / Txn ID"></div>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeVoucherModal()">Cancel</button><button type="submit" class="btn btn-primary">Save Voucher</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div id="task-modal" class="modal hidden">
+      <div class="modal-content glass-card task-modal-wide">
+        <div class="modal-header task-modal-header">
+          <div class="task-modal-heading">
+            <h3 id="task-modal-title">Add Task</h3>
+            <p class="modal-subtitle">Add a billable task — generate its invoice later from the dashboard.</p>
+          </div>
+          <button type="button" class="close-btn" onclick="closeAddTaskModal()" aria-label="Close">&times;</button>
+        </div>
+        <form id="task-form" class="task-modal-form">
+          <div class="task-modal-body">
+            <div class="form-grid form-grid-3">
+              <div class="form-group"><label>Client Name</label><select id="client_select" required onchange="handleClientSelectChange()"><option value="">-- Select Client --</option><option value="NEW">+ Add New Client</option></select></div>
+              <div class="form-group"><label>Task Date</label><input type="date" id="task_date" required></div>
+              <div class="form-group"><label>Service Category</label><select id="task_category" onchange="handleCategorySelectChange()"></select><input type="text" id="task_category_custom" class="hidden" placeholder="Type new category name" style="margin-top:8px;"></div>
+            </div>
+            <div class="tasks-container">
+              <div class="tasks-container-head"><label>Line Items</label></div>
+              <div class="line-items-head" aria-hidden="true"><span>Task Description</span><span>HSN/SAC Code</span><span>Amount</span><span></span></div>
+              <div id="tasks-list-inputs"></div>
+              <button type="button" class="btn btn-outline btn-sm" onclick="addTaskRow()">+ Add Line Item</button>
+            </div>
+            <div class="totals-section task-modal-summary">
+              <div class="total-row"><span>Subtotal</span><span id="display_subtotal">&#8377; 0.00</span></div>
+              <div class="total-row"><span>Charge GST (18%)</span><label class="switch"><input type="checkbox" id="charge_gst" onchange="calculateInvoicingTotals()"><span class="slider round"></span></label></div>
+              <div class="total-row grand-total"><span>Total</span><span id="display_grand_total">&#8377; 0.00</span></div>
+              <div class="form-group full amount-words-group"><label>Amount in Words</label><input type="text" id="amount_words" readonly class="readonly-input"></div>
+            </div>
+          </div>
+          <div class="modal-footer task-modal-footer"><button type="button" class="btn btn-outline" onclick="closeAddTaskModal()">Cancel</button><button type="submit" class="btn btn-primary">Save Task</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div id="client-modal" class="modal hidden">
+      <div class="modal-content glass-card">
+        <h3 id="client-modal-title">Add Client</h3>
+        <form id="client-form">
+          <div class="form-grid">
+            <div class="form-group full"><label for="c_name">Client Name</label><input type="text" id="c_name" required></div>
+            <div class="form-group"><label for="c_email">Email</label><input type="email" id="c_email"></div>
+            <div class="form-group"><label for="c_phone">Phone</label><input type="text" id="c_phone"></div>
+            <div class="form-group"><label for="c_gstn">GSTN</label><input type="text" id="c_gstn"></div>
+            <div class="form-group"><label for="c_city">City <span class="req">*</span></label><input type="text" id="c_city" required></div>
+            <div class="form-group"><label for="c_pincode">Pincode <span class="req">*</span></label><input type="text" id="c_pincode" inputmode="numeric" maxlength="6" required></div>
+            <div class="form-group"><label for="c_status">Status</label><select id="c_status"><option value="Active">Active</option><option value="Inactive">Inactive</option></select></div>
+            <div class="form-group full"><label for="c_address">Address</label><textarea id="c_address"></textarea></div>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeClientModal()">Cancel</button><button type="submit" class="btn btn-primary">Save Client</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div id="task-detail-modal" class="modal hidden">
+      <div class="modal-content glass-card">
+        <div class="modal-header"><h3>Task Details</h3><button type="button" class="close-btn" onclick="closeTaskDetail()">&times;</button></div>
+        <div id="task-detail-body"></div>
+        <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="closeTaskDetail()">Close</button></div>
+      </div>
+    </div>
+
+    <div id="company-modal" class="modal hidden">
+      <div class="modal-content glass-card">
+        <div class="modal-header"><h3>Companies</h3><button type="button" class="close-btn" onclick="closeCompanyModal()">&times;</button></div>
+        <div id="company-list" class="company-list"></div>
+        <form id="company-form">
+          <div class="form-grid">
+            <div class="form-group full"><label for="new_company_name">New Company Name</label><input type="text" id="new_company_name" required></div>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeCompanyModal()">Close</button><button type="submit" class="btn btn-primary">+ Add Company</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div id="password-modal" class="modal hidden">
+      <div class="modal-content glass-card">
+        <div class="modal-header"><h3>Change Passkey</h3><button type="button" class="close-btn" onclick="closePasswordModal()">&times;</button></div>
+        <form id="password-form">
+          <div class="form-grid">
+            <div class="form-group full"><label for="pw_current">Current Passkey</label><input type="password" id="pw_current" autocomplete="current-password" required></div>
+            <div class="form-group"><label for="pw_new">New Passkey</label><input type="password" id="pw_new" autocomplete="new-password" required></div>
+            <div class="form-group"><label for="pw_confirm">Confirm New Passkey</label><input type="password" id="pw_confirm" autocomplete="new-password" required></div>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closePasswordModal()">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div id="bulk-upload-modal" class="modal hidden">
+      <div class="modal-content glass-card">
+        <div class="modal-header"><h3>Bulk Task Upload</h3><button type="button" class="close-btn" onclick="closeBulkUploadModal()">&times;</button></div>
+        <p class="subtle">Upload an Excel file to add many tasks at once. Required columns: <strong>Client Name, Task Description, Amount, GST (Yes/No)</strong>. Optional: HSN, Service Category, Date. Unknown clients are created automatically.</p>
+        <div class="bulk-actions">
+          <button type="button" class="btn btn-outline" onclick="downloadBulkTemplate()">Download Template</button>
+          <input type="file" id="bulk-file" accept=".xlsx,.xls">
+        </div>
+        <div id="bulk-result" class="bulk-result hidden"></div>
+        <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeBulkUploadModal()">Cancel</button><button type="button" class="btn btn-primary" onclick="submitBulkUpload()">Upload Tasks</button></div>
+      </div>
+    </div>
+
+    <div id="payment-modal" class="modal hidden">
+      <div class="modal-content glass-card payment-modal">
+        <div class="modal-header"><h3>Mark Payment</h3><button type="button" class="close-btn" onclick="closePaymentModal()">&times;</button></div>
+        <div id="payment_history_section" class="payment-history hidden">
+          <h4>Previous Payments</h4>
+          <div id="payment_history_list"></div>
+        </div>
+        <form id="payment-form">
+          <div class="payment-invoice-total">Invoice Total: <strong id="payment_invoice_total">&#8377; 0.00</strong></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Amount Received</label><input type="number" id="payment_amount_received" step="0.01" oninput="updatePaymentTotal()"></div>
+            <div class="form-group"><label>Discount Given</label><input type="number" id="payment_discount_given" step="0.01" oninput="updatePaymentTotal()"></div>
+          </div>
+          <div class="payment-balance">Balance Due: <strong id="payment_balance_due">&#8377; 0.00</strong></div>
+          <div id="payment_error" class="payment-error hidden"></div>
+          <div class="payment-total">Total Applied: <strong id="payment_total_applied">&#8377; 0.00</strong></div>
+          <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closePaymentModal()">Cancel</button><button type="submit" class="btn btn-primary">Save Payment</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div id="payment-display-modal" class="modal hidden">
+      <div class="modal-content glass-card payment-display-card">
+        <div class="modal-header"><h3>Include on Invoice</h3><button type="button" class="close-btn" onclick="resolvePaymentDisplay(null)">&times;</button></div>
+        <p class="subtle">Choose what payment information to print at the bottom of the invoice.</p>
+        <div class="payment-display-options">
+          <button class="btn payment-display-btn" onclick="resolvePaymentDisplay('qr')">
+            <span class="payment-display-icon">&#128247;</span>
+            <strong>QR Code</strong>
+            <small>UPI QR for instant payment</small>
+          </button>
+          <button class="btn payment-display-btn" onclick="resolvePaymentDisplay('bank')">
+            <span class="payment-display-icon">&#127968;</span>
+            <strong>Bank Details</strong>
+            <small>Account no., IFSC &amp; bank name</small>
+          </button>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="resolvePaymentDisplay(null)">Skip</button></div>
+      </div>
+    </div>
+
+    <div id="progress-modal" class="modal hidden progress-modal">
+      <div class="modal-content glass-card progress-card">
+        <div class="progress-spinner"></div>
+        <h3 id="progress-title">Working...</h3>
+        <p id="progress-message">Please wait while we process your request.</p>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
