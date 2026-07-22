@@ -248,6 +248,10 @@ function setupEventListeners() {
   document.getElementById('password-form')?.addEventListener('submit', savePassword);
   document.getElementById('payment-form')?.addEventListener('submit', savePayment);
   document.addEventListener('keydown', handleKeyboardShortcuts);
+  document.addEventListener('mousedown', closeComboListsOnOutsideClick);
+  document.addEventListener('mousedown', (event) => {
+    if (openPicker && !openPicker.panel.contains(event.target) && event.target.id !== `${openPicker.inputId}_display`) closeDatePicker();
+  });
 }
 function activeViewId() { const v = Array.from(document.querySelectorAll('.view')).find((el) => !el.classList.contains('hidden')); return v ? v.id : ''; }
 function openModalEl() { return Array.from(document.querySelectorAll('.modal')).find((el) => !el.classList.contains('hidden')) || null; }
@@ -280,7 +284,7 @@ function handleKeyboardShortcuts(e) {
   const view = activeViewId();
   const typing = isTypingTarget();
 
-  if (key === 'escape') { if (modal) { e.preventDefault(); closeTopModal(modal); } else if (typing) document.activeElement.blur(); return; }
+  if (key === 'escape') { if (openPicker) { e.preventDefault(); closeDatePicker(); } else if (modal) { e.preventDefault(); closeTopModal(modal); } else if (typing) document.activeElement.blur(); return; }
   if (key === 'f5' && !ctrl) { e.preventDefault(); refreshCurrentView(); return; }
   if (ctrl && (key === 'enter' || key === 's')) { e.preventDefault(); if (modal) submitOpenModal(modal); return; }
 
@@ -376,7 +380,7 @@ function restartAndUpdate() {
 }
 function updateDashboardInfo() { document.getElementById('display-firm-name').innerText = state.firm.name; document.getElementById('display-partner-name').innerText = `Owner: ${state.firm.partner}`; }
 function showSettings() { document.getElementById('firm_name').value = state.firm.name || ''; document.getElementById('partner_name').value = state.firm.partner || ''; document.getElementById('phone').value = state.firm.phone || ''; document.getElementById('email').value = state.firm.email || ''; document.getElementById('gstn').value = state.firm.gstn || ''; document.getElementById('upi_id_setup').value = state.firm.upi_id || ''; document.getElementById('bank_name').value = state.firm.bank_name || ''; document.getElementById('bank_account').value = state.firm.bank_account || ''; document.getElementById('bank_ifsc').value = state.firm.bank_ifsc || ''; showView('onboarding-view'); setActiveNav('settings'); }
-function updateClientSelects() { const select = document.getElementById('client_select'); while (select.options.length > 2) select.remove(2); state.clients.forEach((client) => { const option = document.createElement('option'); option.value = client.name; option.innerText = client.name; select.appendChild(option); }); }
+function updateClientSelects() { const select = document.getElementById('client_select'); while (select.options.length > 2) select.remove(2); state.clients.forEach((client) => { const option = document.createElement('option'); option.value = client.name; option.innerText = client.name; select.appendChild(option); }); resetSelectSearch('client_select'); }
 function showClientsView() { fetchClients(); showView('clients-view'); setActiveNav('clients'); }
 function showReportsView() {
   const select = document.getElementById('report-client');
@@ -384,8 +388,35 @@ function showReportsView() {
   while (select.options.length > 1) select.remove(1);
   state.clients.forEach((client) => { const option = document.createElement('option'); option.value = client.name; option.innerText = client.name; select.appendChild(option); });
   select.value = current;
+  populateReportFYSelect();
   showView('reports-view');
   setActiveNav('reports');
+  runReport();
+}
+// Indian financial year: April through March. Mirrors the server's fyLabel() so the FY
+// picker here always matches what's actually stored on invoices.
+function currentFYLabel() {
+  const now = new Date();
+  const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)}`;
+}
+function fyDateRange(fy) {
+  const startYear = 2000 + parseInt(fy.slice(0, 2), 10);
+  return { from: `${startYear}-04-01`, to: `${startYear + 1}-03-31` };
+}
+function populateReportFYSelect() {
+  const select = document.getElementById('report-fy');
+  if (!select) return;
+  const current = select.value;
+  const known = new Set(state.tasks.map((t) => t.invoiceFY).filter(Boolean));
+  known.add(currentFYLabel());
+  const years = [...known].sort().reverse();
+  select.innerHTML = '<option value="">All Years</option>' + years.map((fy) => `<option value="${fy}">FY ${fy}</option>`).join('');
+  select.value = years.includes(current) ? current : '';
+}
+function applyReportFYFilter(fy) {
+  if (!fy) { setDateValue('report-from', ''); setDateValue('report-to', ''); }
+  else { const { from, to } = fyDateRange(fy); setDateValue('report-from', from); setDateValue('report-to', to); }
   runReport();
 }
 async function showRemindersView() {
@@ -590,33 +621,38 @@ function renderAdvances() {
 async function showVouchersView() { showView('vouchers-view'); setActiveNav('vouchers'); try { await fetchVouchers(); } catch (error) { showToast(error.message, 'error'); } }
 function showVoucherModal() {
   document.getElementById('voucher-form').reset();
-  document.getElementById('v_date').valueAsDate = new Date();
+  setDateValue('v_date', normalizeDateInput(new Date()));
   const sel = document.getElementById('v_party');
   while (sel.options.length > 1) sel.remove(1);
   state.clients.forEach((c) => { const o = document.createElement('option'); o.value = c.name; o.innerText = c.name; sel.appendChild(o); });
-  document.querySelector('input[name="v_adjust"][value="invoice"]').checked = true;
+  resetSelectSearch('v_party');
+  document.getElementById('v_adjust').value = 'invoice';
   document.getElementById('v_invoice').innerHTML = '<option value="">-- Select Invoice --</option>';
+  resetSelectSearch('v_invoice');
   toggleAdjustmentMode();
   document.getElementById('voucher-modal').classList.remove('hidden');
 }
 function closeVoucherModal() { document.getElementById('voucher-modal').classList.add('hidden'); document.getElementById('voucher-form').reset(); }
-function currentAdjustMode() { return document.querySelector('input[name="v_adjust"]:checked').value; }
+function currentAdjustMode() { return document.getElementById('v_adjust').value; }
 async function openReceiptEntry(taskId) {
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task) return;
   if (!task.invoiceNo) return showToast('Generate the invoice first, then use Receipt Entry.', 'error');
+  if (task.status === 'Invoice Cancelled') return showToast('This invoice has been cancelled and cannot take payments.', 'error');
   showVoucherModal();
   const partySelect = document.getElementById('v_party');
   const amountInput = document.getElementById('v_amount');
   const referenceInput = document.getElementById('v_reference');
   const balanceDue = getBalanceDue(task);
   partySelect.value = task.clientName || '';
+  syncComboInput('v_party');
   amountInput.value = balanceDue > 0 ? balanceDue.toFixed(2) : '';
   referenceInput.value = task.invoiceNo || '';
-  document.querySelector('input[name="v_adjust"][value="invoice"]').checked = true;
+  document.getElementById('v_adjust').value = 'invoice';
   toggleAdjustmentMode();
   await onVoucherPartyChange();
   document.getElementById('v_invoice').value = task.invoiceNo || '';
+  syncComboInput('v_invoice');
 }
 function toggleAdjustmentMode() {
   const isInvoice = currentAdjustMode() === 'invoice';
@@ -629,6 +665,7 @@ async function onVoucherPartyChange() {
   const sel = document.getElementById('v_invoice');
   const hint = document.getElementById('v_invoice_hint');
   sel.innerHTML = '<option value="">-- Select Invoice --</option>';
+  resetSelectSearch('v_invoice');
   if (!party) { hint.classList.add('hidden'); return; }
   try {
     const invoices = await getJson(`http://localhost:3000/vouchers/open-invoices?party=${encodeURIComponent(party)}`);
@@ -642,9 +679,10 @@ async function saveVoucher(e) {
   const amount = Number(document.getElementById('v_amount').value) || 0;
   const adjustmentType = currentAdjustMode();
   const invoiceNo = document.getElementById('v_invoice').value;
+  if (!document.getElementById('v_date').value) return showToast('Select a voucher date.', 'error');
   if (!party) return showToast('Select a party.', 'error');
   if (!(amount > 0)) return showToast('Enter an amount greater than zero.', 'error');
-  if (adjustmentType === 'invoice' && !invoiceNo) return showToast('Select an invoice to adjust against, or choose New Reference (advance).', 'error');
+  if (adjustmentType === 'invoice' && !invoiceNo) return showToast('Select an invoice to adjust against, or choose New Reference.', 'error');
   try {
     const data = await requestJson('http://localhost:3000/vouchers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: document.getElementById('v_date').value, party, amount, mode: document.getElementById('v_mode').value, reference: document.getElementById('v_reference').value.trim(), adjustmentType, invoiceNo }) }, { title: 'Saving voucher...', message: 'Recording voucher and updating billing.' });
     closeVoucherModal();
@@ -663,7 +701,7 @@ async function saveVoucher(e) {
     showToast(msg);
   } catch (error) { showToast(error.message, 'error'); }
 }
-function handleClientSelectChange() { if (document.getElementById('client_select').value === 'NEW') { showAddClientModal(); document.getElementById('client_select').value = ''; } }
+function handleClientSelectChange() { if (document.getElementById('client_select').value === 'NEW') { showAddClientModal(); document.getElementById('client_select').value = ''; syncComboInput('client_select'); } }
 function showAddClientModal(clientName = '') { document.getElementById('client-modal').classList.remove('hidden'); document.getElementById('client-modal-title').innerText = clientName ? 'Edit Client' : 'Add Client'; if (clientName) { const client = state.clients.find((c) => c.name === clientName); if (client) { document.getElementById('c_name').value = client.name; document.getElementById('c_email').value = client.email; document.getElementById('c_phone').value = client.phone; document.getElementById('c_gstn').value = client.gstn || ''; document.getElementById('c_address').value = client.address || ''; document.getElementById('c_status').value = client.status || 'Active'; document.getElementById('c_city').value = client.city || ''; document.getElementById('c_pincode').value = client.pincode || ''; } } }
 function closeClientModal() { document.getElementById('client-modal').classList.add('hidden'); document.getElementById('client-form').reset(); }
 async function fetchCompanies() {
@@ -713,9 +751,20 @@ function findSimilarClients(name) {
     return current.includes(target) || target.includes(current);
   });
 }
+function wordCount(str) { const t = String(str || '').trim(); return t ? t.split(/\s+/).length : 0; }
 async function saveClient(e) {
   e.preventDefault();
   const name = document.getElementById('c_name').value.trim();
+  const email = document.getElementById('c_email').value.trim();
+  const phone = document.getElementById('c_phone').value.trim();
+  const address = document.getElementById('c_address').value.trim();
+  if (wordCount(name) > 30) return showToast('Client name cannot exceed 30 words.', 'error');
+  if (email) {
+    if (email.length > 30) return showToast('Email cannot exceed 30 characters.', 'error');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showToast('Enter a valid email address.', 'error');
+  }
+  if (phone && !/^[6-9]\d{9}$/.test(phone)) return showToast('Enter a valid 10-digit phone number.', 'error');
+  if (wordCount(address) > 20) return showToast('Address cannot exceed 20 words.', 'error');
   const isExisting = state.clients.some((client) => client.name.toLowerCase() === name.toLowerCase());
   if (!isExisting) {
     const similar = findSimilarClients(name);
@@ -779,13 +828,13 @@ function handleCategorySelectChange() {
   customInput.classList.toggle('hidden', !isCustom);
   if (isCustom) customInput.focus(); else customInput.value = '';
 }
-function showAddTaskModal() { state.currentTaskId = null; document.getElementById('task-modal-title').innerText = 'Add Task'; document.getElementById('task-modal').classList.remove('hidden'); document.getElementById('task-form').reset(); document.getElementById('task_date').valueAsDate = new Date(); document.getElementById('charge_gst').checked = state.gstTab === 'gst'; fillCategorySelect(state.categoryFilter !== 'all' ? state.categoryFilter : 'Other'); document.getElementById('tasks-list-inputs').innerHTML = buildTaskRow(); calculateInvoicingTotals(); }
+function showAddTaskModal() { state.currentTaskId = null; document.getElementById('task-modal-title').innerText = 'Add Task'; document.getElementById('task-modal').classList.remove('hidden'); document.getElementById('task-form').reset(); resetSelectSearch('client_select'); setDateValue('task_date', normalizeDateInput(new Date())); document.getElementById('charge_gst').checked = state.gstTab === 'gst'; fillCategorySelect(state.categoryFilter !== 'all' ? state.categoryFilter : 'Other'); document.getElementById('tasks-list-inputs').innerHTML = buildTaskRow(); calculateInvoicingTotals(); }
 function closeAddTaskModal() { document.getElementById('task-modal').classList.add('hidden'); document.getElementById('task-form').reset(); state.currentTaskId = null; }
 function addTaskRow(item = {}) { document.getElementById('tasks-list-inputs').insertAdjacentHTML('beforeend', buildTaskRow(item)); }
 function removeTaskRow(btn) { if (document.querySelectorAll('.task-row').length > 1) btn.parentElement.remove(); calculateInvoicingTotals(); }
 function calculateInvoicingTotals() { let subtotal = 0; document.querySelectorAll('.item-amount').forEach((input) => { subtotal += Number(input.value) || 0; }); const gst = document.getElementById('charge_gst').checked ? subtotal * 0.18 : 0; const total = subtotal + gst; document.getElementById('display_subtotal').innerText = `${RUPEE_SYMBOL} ${subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`; document.getElementById('display_grand_total').innerText = `${RUPEE_SYMBOL} ${total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`; document.getElementById('amount_words').value = numberToWords(Math.floor(total)); }
-async function saveTask(e) { e.preventDefault(); const items = Array.from(document.querySelectorAll('.task-row')).map((row) => ({ desc: row.querySelector('.item-desc').value.trim(), hsn: row.querySelector('.item-hsn').value.trim(), amt: Number(row.querySelector('.item-amount').value) || 0 })).filter((item) => item.desc); if (!items.length) return showToast('Please add at least one line item.', 'error'); const categorySelectValue = document.getElementById('task_category').value; let category = categorySelectValue; if (categorySelectValue === '__custom__') { category = document.getElementById('task_category_custom').value.trim(); if (!category) return showToast('Enter a name for the custom category.', 'error'); } try { const payload = { clientName: document.getElementById('client_select').value, date: document.getElementById('task_date').value, chargeGst: document.getElementById('charge_gst').checked, category, items }; const url = state.currentTaskId ? `http://localhost:3000/tasks/${state.currentTaskId}` : 'http://localhost:3000/tasks'; const method = state.currentTaskId ? 'PUT' : 'POST'; await requestJson(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, { title: state.currentTaskId ? 'Saving changes...' : 'Saving task...', message: state.currentTaskId ? 'Updating task and invoice data.' : 'Adding task without generating invoice.' }); closeAddTaskModal(); await fetchTasks(); showToast(state.currentTaskId ? 'Task updated successfully.' : 'Task added successfully.'); } catch (error) { showToast(error.message, 'error'); } }
-async function editTask(taskId) { const task = state.tasks.find((item) => item.id === taskId); if (!task) return; state.currentTaskId = taskId; document.getElementById('task-modal-title').innerText = task.invoiceNo ? `Edit Task (${task.invoiceNo})` : 'Edit Task'; document.getElementById('task-modal').classList.remove('hidden'); document.getElementById('client_select').value = task.clientName; document.getElementById('task_date').value = normalizeDateInput(task.date); document.getElementById('charge_gst').checked = task.gst === '18%'; fillCategorySelect(task.category); document.getElementById('tasks-list-inputs').innerHTML = ''; (task.items || []).forEach((item) => addTaskRow(item)); if (!(task.items || []).length) addTaskRow({ desc: task.details, amt: task.amount }); calculateInvoicingTotals(); }
+async function saveTask(e) { e.preventDefault(); const items = Array.from(document.querySelectorAll('.task-row')).map((row) => ({ desc: row.querySelector('.item-desc').value.trim(), hsn: row.querySelector('.item-hsn').value.trim(), amt: Number(row.querySelector('.item-amount').value) || 0 })).filter((item) => item.desc); if (!items.length) return showToast('Please add at least one line item.', 'error'); if (!document.getElementById('client_select').value) return showToast('Select a client.', 'error'); if (!document.getElementById('task_date').value) return showToast('Select a task date.', 'error'); const categorySelectValue = document.getElementById('task_category').value; let category = categorySelectValue; if (categorySelectValue === '__custom__') { category = document.getElementById('task_category_custom').value.trim(); if (!category) return showToast('Enter a name for the custom category.', 'error'); } try { const payload = { clientName: document.getElementById('client_select').value, date: document.getElementById('task_date').value, chargeGst: document.getElementById('charge_gst').checked, category, items }; const url = state.currentTaskId ? `http://localhost:3000/tasks/${state.currentTaskId}` : 'http://localhost:3000/tasks'; const method = state.currentTaskId ? 'PUT' : 'POST'; await requestJson(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, { title: state.currentTaskId ? 'Saving changes...' : 'Saving task...', message: state.currentTaskId ? 'Updating task and invoice data.' : 'Adding task without generating invoice.' }); closeAddTaskModal(); await fetchTasks(); showToast(state.currentTaskId ? 'Task updated successfully.' : 'Task added successfully.'); } catch (error) { showToast(error.message, 'error'); } }
+async function editTask(taskId) { const task = state.tasks.find((item) => item.id === taskId); if (!task) return; if (task.status === 'Invoice Cancelled') return showToast('This invoice has been cancelled and cannot be edited.', 'error'); state.currentTaskId = taskId; document.getElementById('task-modal-title').innerText = task.invoiceNo ? `Edit Task (${task.invoiceNo})` : 'Edit Task'; document.getElementById('task-modal').classList.remove('hidden'); resetSelectSearch('client_select'); document.getElementById('client_select').value = task.clientName; syncComboInput('client_select'); setDateValue('task_date', normalizeDateInput(task.date)); document.getElementById('charge_gst').checked = task.gst === '18%'; fillCategorySelect(task.category); document.getElementById('tasks-list-inputs').innerHTML = ''; (task.items || []).forEach((item) => addTaskRow(item)); if (!(task.items || []).length) addTaskRow({ desc: task.details, amt: task.amount }); calculateInvoicingTotals(); }
 function categoryOf(task) { return task.category && task.category.trim() ? task.category : 'Other'; }
 function timeRange() {
   const now = new Date();
@@ -818,13 +867,14 @@ function filteredTasks() {
   const payStatus = document.getElementById('filter-pay-status')?.value || '';
   return scopedTasks().filter((task) =>
     (state.categoryFilter === 'all' || categoryOf(task) === state.categoryFilter) &&
-    (!search || matches(task.clientName, search) || matches(task.details, search)) &&
+    (!search || matches(task.clientName, search) || matches(task.details, search) || matches(task.invoiceNo, search)) &&
     (!from || (task.date || '') >= from) && (!to || (task.date || '') <= to) &&
     (!invStatus || task.status === invStatus) &&
     (!payStatus || task.paymentStatus === payStatus));
 }
 function resetFilters() {
-  ['filter-search', 'filter-from', 'filter-to', 'filter-inv-status', 'filter-pay-status'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+  ['filter-search', 'filter-inv-status', 'filter-pay-status'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+  setDateValue('filter-from', ''); setDateValue('filter-to', '');
   renderTasks();
 }
 const ICONS = {
@@ -834,26 +884,30 @@ const ICONS = {
   edit: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
   download: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
   receipt: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1V2l-2 1-2-1-2 1-2-1-2 1-2-1z"/><path d="M8 8h8"/><path d="M8 12h5"/></svg>',
-  trash: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>'
+  trash: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>',
+  ban: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="5.5" y1="5.5" x2="18.5" y2="18.5"/></svg>'
 };
 function renderTasks() {
   const tbody = document.getElementById('task-list'); tbody.innerHTML = '';
   const selectAll = document.getElementById('select-all-rows'); if (selectAll) selectAll.checked = false;
   filteredTasks().forEach((task) => {
     const safeId = task.id.replace(/'/g, "\\'");
-    const genIcon = task.status === 'Invoice Generated' ? ICONS.regenerate : ICONS.generate;
-    const genTitle = task.status === 'Invoice Generated' ? 'Re-generate invoice' : 'Generate invoice';
-    const invBadge = task.status === 'Invoice Generated' ? 'badge-green' : 'badge-orange';
+    const isCancelled = task.status === 'Invoice Cancelled';
+    const isGenerated = task.status === 'Invoice Generated';
+    const genIcon = isGenerated ? ICONS.regenerate : ICONS.generate;
+    const genTitle = isCancelled ? 'Invoice cancelled' : isGenerated ? 'Re-generate invoice' : 'Generate invoice';
+    const invBadge = isGenerated ? 'badge-green' : isCancelled ? 'badge-gray' : 'badge-orange';
     const payBadge = task.paymentStatus === 'Payment Received' ? 'badge-green' : 'badge-red';
     const hasInv = !!task.invoiceNo;
     const client = escapeHtml(task.clientName);
     const details = escapeHtml(task.details || '-');
     const actions = [
-      `<button class="icon-btn" title="${genTitle}" onclick="generateInvoice('${safeId}')">${genIcon}</button>`,
+      `<button class="icon-btn" title="${genTitle}" onclick="generateInvoice('${safeId}')" ${isCancelled ? 'disabled' : ''}>${genIcon}</button>`,
       `<button class="icon-btn" title="View details" onclick="showTaskDetail('${safeId}')">${ICONS.view}</button>`,
-      `<button class="icon-btn" title="Edit task" onclick="editTask('${safeId}')">${ICONS.edit}</button>`,
+      `<button class="icon-btn" title="${isCancelled ? 'Cancelled invoices cannot be edited' : 'Edit task'}" onclick="editTask('${safeId}')" ${isCancelled ? 'disabled' : ''}>${ICONS.edit}</button>`,
       `<button class="icon-btn" title="Download invoice" onclick="openInvoice('${safeId}')" ${hasInv ? '' : 'disabled'}>${ICONS.download}</button>`,
-      `<button class="icon-btn icon-receipt" title="Receipt entry" onclick="openReceiptEntry('${safeId}')">${ICONS.receipt}</button>`,
+      `<button class="icon-btn icon-receipt" title="${isCancelled ? 'Cancelled invoices cannot take payments' : 'Receipt entry'}" onclick="openReceiptEntry('${safeId}')" ${isCancelled ? 'disabled' : ''}>${ICONS.receipt}</button>`,
+      `<button class="icon-btn icon-cancel-invoice" title="Cancel invoice" onclick="cancelInvoice('${safeId}')" ${isGenerated ? '' : 'disabled'}>${ICONS.ban}</button>`,
       `<button class="icon-btn icon-delete" title="Delete task" onclick="deleteTask('${safeId}')">${ICONS.trash}</button>`
     ].join('');
     const tr = document.createElement('tr');
@@ -998,7 +1052,7 @@ async function batchProcess(action) {
     }
   } else {
     const tasks = ids.map((id) => { const task = state.tasks.find((item) => item.id === id); const client = state.clients.find((entry) => entry.name === task.clientName); return { ...task, phone: client?.phone || '' }; });
-    const pendingTasks = tasks.filter((task) => task.status === 'Invoice Pending');
+    const pendingTasks = tasks.filter((task) => task.status !== 'Invoice Generated');
     if (pendingTasks.length) {
       flashTaskRows(pendingTasks.map((task) => task.id));
       showToast(`Only generated invoices can be used for ${action === 'send' ? 'WhatsApp export' : 'reminder export'}.`, 'error');
@@ -1048,8 +1102,37 @@ async function submitBulkUpload() {
   };
   reader.readAsDataURL(input.files[0]);
 }
+function showClientBulkUploadModal() { document.getElementById('client-bulk-file').value = ''; document.getElementById('client-bulk-result').classList.add('hidden'); document.getElementById('client-bulk-upload-modal').classList.remove('hidden'); }
+function closeClientBulkUploadModal() { document.getElementById('client-bulk-upload-modal').classList.add('hidden'); }
+function downloadClientBulkTemplate() { const link = document.createElement('a'); link.href = 'http://localhost:3000/clients/bulk-template'; document.body.appendChild(link); link.click(); link.remove(); }
+async function submitClientBulkUpload() {
+  const input = document.getElementById('client-bulk-file');
+  if (!input.files || !input.files[0]) return showToast('Please choose an Excel file first.', 'error');
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    const fileBase64 = String(ev.target.result).split(',')[1] || '';
+    try {
+      const data = await requestJson('http://localhost:3000/clients/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileBase64 }) }, { title: 'Uploading clients...', message: 'Reading the workbook and creating clients.' });
+      const result = document.getElementById('client-bulk-result');
+      result.classList.remove('hidden');
+      result.innerHTML = `<strong>${data.created} client(s) added.</strong>${(data.errors || []).length ? `<br>Skipped ${data.errors.length} row(s):<br>${data.errors.map((e) => escapeHtml(e)).join('<br>')}` : ''}`;
+      await fetchClients();
+      showToast(`${data.created} client(s) added.`);
+    } catch (error) { showToast(error.message, 'error'); }
+  };
+  reader.readAsDataURL(input.files[0]);
+}
 function openInvoice(taskId) { const task = state.tasks.find((item) => item.id === taskId); if (!task?.invoiceFile) return; window.open(`http://localhost:3000/view-invoice?filename=${encodeURIComponent(task.invoiceFile)}&monthYear=${encodeURIComponent(task.invoiceMonth)}`, '_blank'); }
 function confirmAction(message) { return Promise.resolve(window.confirm(message)); }
+async function cancelInvoice(taskId) {
+  const task = state.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+  if (!(await confirmAction(`Cancel invoice ${task.invoiceNo} for "${task.clientName}"? It keeps its number but is marked Cancelled and excluded from reports/outstanding.`))) return;
+  try {
+    await requestJson(`http://localhost:3000/tasks/${encodeURIComponent(taskId)}/cancel-invoice`, { method: 'POST' }, { title: 'Cancelling invoice...', message: 'Marking the invoice as cancelled.' });
+    await fetchTasks(); showToast('Invoice cancelled.');
+  } catch (error) { showToast(error.message, 'error'); }
+}
 async function deleteTask(taskId) {
   const task = state.tasks.find((t) => t.id === taskId);
   if (!task) return;
@@ -1120,7 +1203,255 @@ async function cancelPayment(taskId) { if (!window.confirm('Cancel the recorded 
 async function savePayment(e) { e.preventDefault(); const task = state.tasks.find((item) => item.id === state.paymentTaskId); const amountReceived = Number(document.getElementById('payment_amount_received').value) || 0; const discountGiven = Number(document.getElementById('payment_discount_given').value) || 0; const totalApplied = amountReceived + discountGiven; const balanceDue = task ? getBalanceDue(task) : 0; if (totalApplied - balanceDue > 0.001) return showToast('Total applied cannot exceed the balance due.', 'error'); try { await requestJson('http://localhost:3000/record-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: state.paymentTaskId, amountReceived, discountGiven }) }, { title: 'Updating payment...', message: 'Recording payment and refreshing invoice PDF.' }); closePaymentModal(); await fetchTasks(); showToast('Payment updated successfully.'); } catch (error) { showToast(error.message, 'error'); } }
 function val(id) { return document.getElementById(id)?.value.trim().toLowerCase() || ''; }
 function matches(value, filter) { return !filter || String(value || '').toLowerCase().includes(filter); }
+// Unified combobox: one text input drives a floating list, backed by the real <select>
+// (kept in the DOM, visually hidden) so every existing .value/.onchange/population call keeps working.
+function comboWrap(selectId) { return document.getElementById(selectId)?.closest('.searchable-select') || null; }
+function comboSearchInput(selectId) { return comboWrap(selectId)?.querySelector('.searchable-select-search') || null; }
+function comboListEl(selectId) { return comboWrap(selectId)?.querySelector('.combo-list') || null; }
+const comboHighlightIndex = {}; // selectId -> index of the keyboard-highlighted option in its current rendered list
+function renderComboList(selectId, query) {
+  const select = document.getElementById(selectId);
+  const list = comboListEl(selectId);
+  if (!select || !list) return;
+  const q = (query || '').trim().toLowerCase();
+  const opts = Array.from(select.options).filter((opt) => opt.value);
+  const matched = q ? opts.filter((opt) => opt.textContent.toLowerCase().includes(q)) : opts;
+  comboHighlightIndex[selectId] = matched.length ? 0 : -1;
+  list.innerHTML = matched.length
+    ? matched.map((opt, i) => `<div class="combo-option${opt.value === select.value ? ' active' : ''}${i === 0 ? ' highlighted' : ''}" data-value="${escapeHtml(opt.value)}">${escapeHtml(opt.textContent)}</div>`).join('')
+    : '<div class="combo-empty">No matches found</div>';
+}
+// Moves the keyboard highlight up/down through the currently rendered options (wraps at the ends).
+function moveComboHighlight(selectId, delta) {
+  const list = comboListEl(selectId);
+  const options = list ? Array.from(list.querySelectorAll('.combo-option')) : [];
+  if (!options.length) return;
+  const current = comboHighlightIndex[selectId];
+  const idx = (((typeof current === 'number' ? current : 0) + delta) % options.length + options.length) % options.length;
+  comboHighlightIndex[selectId] = idx;
+  options.forEach((el, i) => el.classList.toggle('highlighted', i === idx));
+  options[idx].scrollIntoView({ block: 'nearest' });
+}
+function openComboList(selectId) { comboListEl(selectId)?.classList.remove('hidden'); }
+function closeComboList(selectId) { comboListEl(selectId)?.classList.add('hidden'); }
+function closeAllComboLists() { document.querySelectorAll('.combo-list').forEach((list) => list.classList.add('hidden')); }
+function closeComboListsOnOutsideClick(event) {
+  document.querySelectorAll('.searchable-select').forEach((wrap) => { if (!wrap.contains(event.target)) wrap.querySelector('.combo-list')?.classList.add('hidden'); });
+}
+function filterSelectOptions(selectId, query) { renderComboList(selectId, query); openComboList(selectId); }
+function syncComboInput(selectId) {
+  const select = document.getElementById(selectId);
+  const input = comboSearchInput(selectId);
+  if (!select || !input) return;
+  const opt = select.options[select.selectedIndex];
+  input.value = (opt && opt.value) ? opt.textContent : '';
+}
+function resetSelectSearch(selectId) { syncComboInput(selectId); closeComboList(selectId); }
+function pickComboOption(selectId, value) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  select.value = value;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  syncComboInput(selectId);
+  closeComboList(selectId);
+}
+function handleComboMousedown(event) {
+  event.preventDefault(); // keeps the search input focused so the click still lands on the option
+  const optionEl = event.target.closest('.combo-option');
+  if (!optionEl) return;
+  pickComboOption(event.currentTarget.dataset.select, optionEl.dataset.value);
+}
+function comboKeydown(event, selectId) {
+  if (event.key === 'Escape') { closeComboList(selectId); event.target.blur(); return; }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const list = comboListEl(selectId);
+    if (list && list.classList.contains('hidden')) renderComboList(selectId, event.target.value);
+    openComboList(selectId);
+    moveComboHighlight(selectId, event.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const options = Array.from(comboListEl(selectId)?.querySelectorAll('.combo-option') || []);
+    const idx = comboHighlightIndex[selectId];
+    const target = (typeof idx === 'number' && options[idx]) ? options[idx] : options[0];
+    if (target) pickComboOption(selectId, target.dataset.value);
+  }
+}
 function normalizeDateInput(value) { if (!value) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value; const parsed = new Date(value); if (!Number.isNaN(parsed.getTime())) return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`; const parts = String(value).split(',')[0].split('/'); return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : ''; }
 function formatDate(value) { const normalized = normalizeDateInput(value); return normalized ? new Date(`${normalized}T00:00:00`).toLocaleDateString('en-IN') : ''; }
+// Custom themed calendar dropdown replacing the native (unstylable) browser date picker.
+// Each date field is a hidden ISO input (id) — read by every existing .value/onchange call
+// elsewhere in the app, unchanged — paired with a visible typeable "id_display" text input
+// showing dd-mm-yyyy. The calendar and manual typing both just write through setDateValue().
+let openPicker = null; // { inputId, panel, year, month, view }
+function isoOf(y, m, d) { return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`; }
+function displayFormat(iso) { if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return ''; const [y, m, d] = iso.split('-'); return `${d}-${m}-${y}`; }
+function parseDisplayDate(text) {
+  const match = String(text || '').trim().match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (!match) return '';
+  const day = parseInt(match[1], 10), month = parseInt(match[2], 10), year = parseInt(match[3], 10);
+  if (month < 1 || month > 12) return '';
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return '';
+  return isoOf(year, month - 1, day);
+}
+function syncDateDisplay(id) {
+  const display = document.getElementById(`${id}_display`);
+  const hidden = document.getElementById(id);
+  if (display && hidden) display.value = displayFormat(hidden.value);
+}
+function setDateValue(id, iso) {
+  const hidden = document.getElementById(id);
+  if (!hidden) return;
+  hidden.value = iso;
+  syncDateDisplay(id);
+  hidden.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function handleDateTyped(id, text) {
+  const iso = parseDisplayDate(text);
+  if (!iso) return; // wait for a complete, valid dd-mm-yyyy before committing
+  const hidden = document.getElementById(id);
+  if (!hidden) return;
+  hidden.value = iso;
+  hidden.dispatchEvent(new Event('change', { bubbles: true }));
+  if (openPicker && openPicker.inputId === id) {
+    openPicker.year = parseInt(iso.slice(0, 4), 10); openPicker.month = parseInt(iso.slice(5, 7), 10) - 1; openPicker.view = 'day';
+    renderDatePicker(); positionDatePicker();
+  }
+}
+function handleDateBlur(id) { syncDateDisplay(id); }
+function openDatePicker(inputId) {
+  if (openPicker && openPicker.inputId === inputId) return closeDatePicker();
+  closeDatePicker();
+  const hidden = document.getElementById(inputId);
+  const display = document.getElementById(`${inputId}_display`);
+  if (!hidden || !display) return;
+  const base = hidden.value ? new Date(`${hidden.value}T00:00:00`) : new Date();
+  const panel = document.createElement('div');
+  panel.className = 'datepicker-panel';
+  document.body.appendChild(panel);
+  openPicker = { inputId, panel, year: base.getFullYear(), month: base.getMonth(), view: 'day' };
+  renderDatePicker();
+  positionDatePicker();
+  window.addEventListener('scroll', positionDatePicker, true);
+  window.addEventListener('resize', positionDatePicker);
+}
+function closeDatePicker() {
+  if (!openPicker) return;
+  openPicker.panel.remove();
+  window.removeEventListener('scroll', positionDatePicker, true);
+  window.removeEventListener('resize', positionDatePicker);
+  openPicker = null;
+}
+function positionDatePicker() {
+  if (!openPicker) return;
+  const display = document.getElementById(`${openPicker.inputId}_display`);
+  if (!display) return closeDatePicker();
+  const rect = display.getBoundingClientRect();
+  const panel = openPicker.panel;
+  const panelWidth = panel.offsetWidth || 280;
+  const panelHeight = panel.offsetHeight || 320;
+  let left = rect.left;
+  if (left + panelWidth > window.innerWidth - 8) left = window.innerWidth - panelWidth - 8;
+  if (left < 8) left = 8;
+  let top = rect.bottom + 6;
+  if (top + panelHeight > window.innerHeight - 8) top = Math.max(8, rect.top - panelHeight - 6);
+  panel.style.left = `${left}px`;
+  panel.style.top = `${top}px`;
+}
+function renderDatePicker() {
+  const view = openPicker.view || 'day';
+  if (view === 'year') return renderYearView();
+  if (view === 'month') return renderMonthView();
+  renderDayView();
+}
+function renderDayView() {
+  const { panel, inputId, year, month } = openPicker;
+  const hidden = document.getElementById(inputId);
+  const selected = hidden.value || '';
+  const today = normalizeDateInput(new Date());
+  const startWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+  const monthLabel = new Date(year, month, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const cells = [];
+  for (let i = 0; i < startWeekday; i++) cells.push({ d: daysInPrevMonth - startWeekday + 1 + i, outside: true });
+  for (let d = 1; d <= daysInMonth; d++) cells.push({ d, iso: isoOf(year, month, d), outside: false });
+  for (let d = 1; cells.length % 7 !== 0; d++) cells.push({ d, outside: true });
+  const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  panel.innerHTML = `
+    <div class="datepicker-header">
+      <button type="button" class="datepicker-nav" data-nav="-1" aria-label="Previous month">&#8249;</button>
+      <button type="button" class="datepicker-title" data-action="show-month">${monthLabel}</button>
+      <button type="button" class="datepicker-nav" data-nav="1" aria-label="Next month">&#8250;</button>
+    </div>
+    <div class="datepicker-weekdays">${weekdays.map((w) => `<span>${w}</span>`).join('')}</div>
+    <div class="datepicker-grid">${cells.map((c) => c.outside
+    ? `<button type="button" class="datepicker-day outside" disabled>${c.d}</button>`
+    : `<button type="button" class="datepicker-day${c.iso === selected ? ' selected' : ''}${c.iso === today ? ' today' : ''}" data-iso="${c.iso}">${c.d}</button>`).join('')}</div>
+    <div class="datepicker-footer">
+      <button type="button" class="datepicker-link" data-action="clear">Clear</button>
+      <button type="button" class="datepicker-link" data-action="today">Today</button>
+    </div>`;
+  panel.onclick = (e) => {
+    const navBtn = e.target.closest('[data-nav]');
+    if (navBtn) {
+      let m = openPicker.month + parseInt(navBtn.dataset.nav, 10); let y = openPicker.year;
+      if (m < 0) { m = 11; y -= 1; } else if (m > 11) { m = 0; y += 1; }
+      openPicker.month = m; openPicker.year = y;
+      renderDatePicker(); positionDatePicker();
+      return;
+    }
+    if (e.target.closest('[data-action="show-month"]')) { openPicker.view = 'month'; renderDatePicker(); positionDatePicker(); return; }
+    const dayBtn = e.target.closest('.datepicker-day:not(.outside)');
+    if (dayBtn) return setDatePickerValue(dayBtn.dataset.iso);
+    const actionBtn = e.target.closest('[data-action]');
+    if (actionBtn) setDatePickerValue(actionBtn.dataset.action === 'today' ? today : '');
+  };
+}
+function renderMonthView() {
+  const { panel, year, month } = openPicker;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  panel.innerHTML = `
+    <div class="datepicker-header">
+      <button type="button" class="datepicker-nav" data-nav-year="-1" aria-label="Previous year">&#8249;</button>
+      <button type="button" class="datepicker-title" data-action="show-year">${year}</button>
+      <button type="button" class="datepicker-nav" data-nav-year="1" aria-label="Next year">&#8250;</button>
+    </div>
+    <div class="datepicker-cell-grid">${months.map((m, i) => `<button type="button" class="datepicker-cell${i === month ? ' selected' : ''}" data-month="${i}">${m}</button>`).join('')}</div>`;
+  panel.onclick = (e) => {
+    const navYear = e.target.closest('[data-nav-year]');
+    if (navYear) { openPicker.year += parseInt(navYear.dataset.navYear, 10); renderMonthView(); positionDatePicker(); return; }
+    if (e.target.closest('[data-action="show-year"]')) { openPicker.view = 'year'; renderDatePicker(); positionDatePicker(); return; }
+    const monthCell = e.target.closest('[data-month]');
+    if (monthCell) { openPicker.month = parseInt(monthCell.dataset.month, 10); openPicker.view = 'day'; renderDatePicker(); positionDatePicker(); }
+  };
+}
+function renderYearView() {
+  const { panel, year } = openPicker;
+  const startYear = year - (year % 12);
+  const years = Array.from({ length: 12 }, (_, i) => startYear + i);
+  panel.innerHTML = `
+    <div class="datepicker-header">
+      <button type="button" class="datepicker-nav" data-nav-block="-1" aria-label="Previous years">&#8249;</button>
+      <span class="datepicker-title">${years[0]}–${years[11]}</span>
+      <button type="button" class="datepicker-nav" data-nav-block="1" aria-label="Next years">&#8250;</button>
+    </div>
+    <div class="datepicker-cell-grid">${years.map((y) => `<button type="button" class="datepicker-cell${y === year ? ' selected' : ''}" data-year="${y}">${y}</button>`).join('')}</div>`;
+  panel.onclick = (e) => {
+    const navBlock = e.target.closest('[data-nav-block]');
+    if (navBlock) { openPicker.year += parseInt(navBlock.dataset.navBlock, 10) * 12; renderYearView(); positionDatePicker(); return; }
+    const yearCell = e.target.closest('[data-year]');
+    if (yearCell) { openPicker.year = parseInt(yearCell.dataset.year, 10); openPicker.view = 'month'; renderDatePicker(); positionDatePicker(); }
+  };
+}
+function setDatePickerValue(iso) {
+  if (!openPicker) return;
+  const id = openPicker.inputId;
+  closeDatePicker();
+  setDateValue(id, iso);
+}
 function escapeHtml(value) { return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function numberToWords(num) { const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']; const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']; if (num === 0) return 'Zero'; const makeWords = (n) => n < 20 ? a[n] : n < 100 ? b[Math.floor(n / 10)] + (n % 10 ? ` ${a[n % 10]}` : '') : n < 1000 ? `${a[Math.floor(n / 100)]} Hundred${n % 100 ? ` and ${makeWords(n % 100)}` : ''}` : n < 100000 ? `${makeWords(Math.floor(n / 1000))} Thousand${n % 1000 ? ` ${makeWords(n % 1000)}` : ''}` : n < 10000000 ? `${makeWords(Math.floor(n / 100000))} Lakh${n % 100000 ? ` ${makeWords(n % 100000)}` : ''}` : `${makeWords(Math.floor(n / 10000000))} Crore${n % 10000000 ? ` ${makeWords(n % 10000000)}` : ''}`; return `${makeWords(num)} Rupees`; }

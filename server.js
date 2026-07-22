@@ -47,7 +47,8 @@ const INVOICE_COLUMNS = [
   { header: 'Service Category', key: 'category', width: 18 },
   { header: 'Reminder DateTime', key: 'reminderDateTime', width: 20 },
   { header: 'Reminder Enabled', key: 'reminderEnabled', width: 16 },
-  { header: 'Last Reminder At', key: 'lastReminderAt', width: 20 }
+  { header: 'Last Reminder At', key: 'lastReminderAt', width: 20 },
+  { header: 'Financial Year', key: 'invoiceFY', width: 12 }
 ];
 const CLIENT_COLUMNS = [
   { header: 'Client Name', key: 'name', width: 30 },
@@ -168,7 +169,7 @@ const ensureDir = (p) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: t
 const json = (v, f = []) => { try { return v ? JSON.parse(typeof v === 'string' ? v : v.text || 'null') : f; } catch { return f; } };
 const s = (v) => v == null ? '' : typeof v === 'object' && v.text ? v.text : String(v);
 const n = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
-const statusOf = (v) => v === 'Invoice Generated' ? 'Invoice Generated' : 'Invoice Pending';
+const statusOf = (v) => (v === 'Invoice Generated' || v === 'Invoice Cancelled') ? v : 'Invoice Pending';
 const paymentOf = (v) => v === 'Payment Received' ? 'Payment Received' : 'Payment Pending';
 const withinRoot = (targetPath, rootPath) => {
   const resolvedTarget = path.resolve(targetPath);
@@ -330,7 +331,7 @@ const setupClientSheet = (sheet) => { sheet.columns = CLIENT_COLUMNS; };
 const setupVoucherSheet = (sheet) => { sheet.columns = VOUCHER_COLUMNS; };
 const setupReminderHistorySheet = (sheet) => { sheet.columns = REMINDER_HISTORY_COLUMNS; };
 function writeTask(row, task) {
-  [task.id, task.date, task.invoiceNo || '', task.clientName, task.details, task.amount, task.gst, task.total, task.status, task.paymentStatus, JSON.stringify(task.items || []), task.invoiceDate || '', task.invoiceFile || '', task.invoiceMonth || '', task.invoiceGroupId || '', JSON.stringify(task.paymentEntries || []), task.paymentDisplay || '', task.category || '', task.reminderDateTime || '', task.reminderEnabled === false ? '0' : '1', task.lastReminderAt || ''].forEach((value, index) => { row.getCell(index + 1).value = value; });
+  [task.id, task.date, task.invoiceNo || '', task.clientName, task.details, task.amount, task.gst, task.total, task.status, task.paymentStatus, JSON.stringify(task.items || []), task.invoiceDate || '', task.invoiceFile || '', task.invoiceMonth || '', task.invoiceGroupId || '', JSON.stringify(task.paymentEntries || []), task.paymentDisplay || '', task.category || '', task.reminderDateTime || '', task.reminderEnabled === false ? '0' : '1', task.lastReminderAt || '', task.invoiceFY || ''].forEach((value, index) => { row.getCell(index + 1).value = value; });
 }
 async function initExcelDB() {
   try {
@@ -484,7 +485,8 @@ function tasksFromWorkbook(wb) {
       category: s(row.getCell(18).value),
       reminderDateTime: s(row.getCell(19).value),
       reminderEnabled: s(row.getCell(20).value) !== '0',
-      lastReminderAt: s(row.getCell(21).value)
+      lastReminderAt: s(row.getCell(21).value),
+      invoiceFY: s(row.getCell(22).value)
     });
   });
   return { sheet, tasks };
@@ -495,16 +497,21 @@ async function loadTasks() {
   return { wb, sheet, tasks };
 }
 function latestDate(tasks) { return tasks.reduce((latest, task) => task.date > latest ? task.date : latest, tasks[0]?.date || normalizeDate(new Date())); }
-async function nextVoucherNo(wb) {
+// Same Indian-FY numbering scheme as invoices: resets per financial year, never reused.
+async function nextVoucherNo(wb, voucherDate) {
   const sheet = wb.getWorksheet('Profile');
-  let next = 1;
+  const fy = fyLabel(voucherDate);
+  const key = `lastVoucherNo_${fy}`;
+  let next = 1; let found = false;
   sheet.eachRow((row, i) => {
-    if (i > 1 && row.getCell(1).value === 'lastVoucherNo') {
+    if (i > 1 && row.getCell(1).value === key) {
       next = (parseInt(row.getCell(2).value || '0', 10) || 0) + 1;
       row.getCell(2).value = String(next);
+      found = true;
     }
   });
-  return `VCH/${String(new Date().getFullYear()).slice(-2)}-${String(new Date().getMonth() + 1).padStart(2, '0')}/${String(next).padStart(3, '0')}`;
+  if (!found) sheet.addRow([key, String(next)]);
+  return `VCH/${fy}/${String(next).padStart(6, '0')}`;
 }
 async function loadVouchers() {
   const wb = await loadWorkbook();
@@ -621,14 +628,15 @@ async function buildReport(type, query = {}) {
       .map((g) => wantGst
         ? [g.invoiceNo, displayDate(g.invoiceDate), g.clientName, gstnByClient.get(g.clientName) || '', money(g.summary.subtotal), money(g.summary.gstAmount), money(g.summary.grossTotal)]
         : [g.invoiceNo, displayDate(g.invoiceDate), g.clientName, money(g.summary.grossTotal), g.paymentStatus]);
+    const billCountLabel = `Total Bills: ${rows.length}`;
     return wantGst ? {
-      title: 'Primary Bill Report', subtitle: `${rangeText} — GST invoices`, firmName: profile.firm_name || '',
+      title: 'Primary Bill Report', subtitle: `${rangeText} — GST invoices — ${rows.length} bill${rows.length === 1 ? '' : 's'}`, firmName: profile.firm_name || '',
       columns: [{ header: 'Invoice No' }, { header: 'Date' }, { header: 'Client' }, { header: 'Client GSTN' }, { header: 'Taxable Value', num: true }, { header: 'GST (18%)', num: true }, { header: 'Invoice Total', num: true }],
-      rows, totals: ['Total', '', '', '', money(rows.reduce((s2, r) => s2 + r[4], 0)), money(rows.reduce((s2, r) => s2 + r[5], 0)), money(rows.reduce((s2, r) => s2 + r[6], 0))]
+      rows, totals: [billCountLabel, '', '', '', money(rows.reduce((s2, r) => s2 + r[4], 0)), money(rows.reduce((s2, r) => s2 + r[5], 0)), money(rows.reduce((s2, r) => s2 + r[6], 0))]
     } : {
-      title: 'Secondary Bill Report', subtitle: `${rangeText} — Non-GST invoices`, firmName: profile.firm_name || '',
+      title: 'Secondary Bill Report', subtitle: `${rangeText} — Non-GST invoices — ${rows.length} bill${rows.length === 1 ? '' : 's'}`, firmName: profile.firm_name || '',
       columns: [{ header: 'Invoice No' }, { header: 'Date' }, { header: 'Client' }, { header: 'Amount', num: true }, { header: 'Payment Status' }],
-      rows, totals: ['Total', '', '', money(rows.reduce((s2, r) => s2 + r[3], 0)), '']
+      rows, totals: [billCountLabel, '', '', money(rows.reduce((s2, r) => s2 + r[3], 0)), '']
     };
   }
   throw new Error('Unknown report type.');
@@ -637,18 +645,30 @@ function invoiceLines(tasks) {
   return tasks.slice().sort((a, b) => a.date.localeCompare(b.date))
     .map((task) => ({ desc: `${task.details}`, amt: n(task.amount), hsn: [...new Set((task.items || []).map((item) => s(item.hsn).trim()).filter(Boolean))].join(', ') }));
 }
-async function nextInvoiceNo(wb, chargeGst) {
+// Indian financial year: April (month index 3) through March. "2026-07-18" -> "26-27".
+function fyLabel(dateInput) {
+  const d = dateInput instanceof Date ? dateInput : new Date(`${normalizeDate(dateInput) || normalizeDate(new Date())}T00:00:00`);
+  const startYear = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)}`;
+}
+// Sequence is scoped per company (one workbook per company) + series (GST/Non-GST prefix) + financial
+// year, and resets to 1 at the start of each new FY. Each FY gets its own persisted counter key so past
+// years' counters are never touched or reused, guaranteeing numbers are unique and never reissued.
+async function nextInvoiceNo(wb, chargeGst, invoiceDate) {
   const sheet = wb.getWorksheet('Profile');
-  const key = chargeGst ? 'lastInvoiceNoGST' : 'lastInvoiceNoNonGST';
+  const fy = fyLabel(invoiceDate);
+  const key = `${chargeGst ? 'lastInvoiceNoGST' : 'lastInvoiceNoNonGST'}_${fy}`;
   const prefix = chargeGst ? 'GST' : 'INV';
-  let next = 1;
+  let next = 1; let found = false;
   sheet.eachRow((row, i) => {
     if (i > 1 && row.getCell(1).value === key) {
       next = (parseInt(row.getCell(2).value || '0', 10) || 0) + 1;
       row.getCell(2).value = String(next);
+      found = true;
     }
   });
-  return `${prefix}/${String(new Date().getFullYear()).slice(-2)}-${String(new Date().getMonth() + 1).padStart(2, '0')}/${String(next).padStart(3, '0')}`;
+  if (!found) sheet.addRow([key, String(next)]);
+  return { invoiceNo: `${prefix}/${fy}/${String(next).padStart(6, '0')}`, fy };
 }
 async function renderInvoice(tasks, invoiceNo, invoiceDate, paymentStatus, paymentDisplay) {
   const profile = await readProfile();
@@ -764,6 +784,65 @@ app.post('/clients', async (req, res) => {
     await writeWorkbookSafe(wb); res.json({ success: true });
   } catch (error) { res.status(500).json({ error: normalizeWorkbookError(error).message }); }
 });
+const CLIENT_BULK_HEADERS = ['Client Name', 'Email', 'Phone', 'GSTN', 'Address', 'City', 'Pincode', 'Status'];
+app.get('/clients/bulk-template', async (req, res) => {
+  try {
+    const wb = new ExcelJS.Workbook();
+    const sheet = wb.addWorksheet('Clients');
+    sheet.columns = CLIENT_BULK_HEADERS.map((header) => ({ header, width: Math.max(header.length + 4, 18) }));
+    sheet.getRow(1).font = { bold: true };
+    sheet.addRow(['Acme Traders', 'accounts@acme.com', '9876543210', '27ABCDE1234F1Z5', '123 MG Road', 'Mumbai', '400001', 'Active']);
+    sheet.addRow(['Rahul Sharma', '', '9123456780', '', '', 'Pune', '411001', 'Active']);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="Bulk Client Upload Template.xlsx"');
+    await wb.xlsx.write(res); res.end();
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+const wordCountServer = (v) => { const t = s(v).trim(); return t ? t.split(/\s+/).length : 0; };
+app.post('/clients/bulk', async (req, res) => {
+  try {
+    const fileBase64 = s(req.body.fileBase64);
+    if (!fileBase64) return res.status(400).json({ error: 'No file provided.' });
+    const upload = new ExcelJS.Workbook();
+    await upload.xlsx.load(Buffer.from(fileBase64, 'base64'));
+    const sheet = upload.worksheets[0];
+    if (!sheet) return res.status(400).json({ error: 'The uploaded file has no sheets.' });
+    const h = headers(sheet);
+    const col = (row, name, fallback) => { const idx = h[name] || fallback; return idx ? row.getCell(idx).value : ''; };
+    const wb = await loadWorkbook();
+    const clientsSheet = wb.getWorksheet('Clients'); setupClientSheet(clientsSheet);
+    const known = new Set(); clientsSheet.eachRow((row, i) => { if (i > 1) known.add(s(row.getCell(1).value).toLowerCase()); });
+    let created = 0; const errors = [];
+    sheet.eachRow((row, i) => {
+      if (i === 1) return;
+      const name = s(col(row, 'Client Name', 1)).trim();
+      const email = s(col(row, 'Email', 2)).trim();
+      const phone = s(col(row, 'Phone', 3)).trim();
+      const gstn = s(col(row, 'GSTN', 4)).trim();
+      const address = s(col(row, 'Address', 5)).trim();
+      const city = s(col(row, 'City', 6)).trim();
+      const pincode = s(col(row, 'Pincode', 7)).trim();
+      const status = s(col(row, 'Status', 8)).trim() || 'Active';
+      if (!name && !city && !pincode) return; // blank row
+      if (!name) { errors.push(`Row ${i}: Client Name is required.`); return; }
+      if (wordCountServer(name) > 30) { errors.push(`Row ${i}: Client name cannot exceed 30 words.`); return; }
+      if (known.has(name.toLowerCase())) { errors.push(`Row ${i}: "${name}" already exists, skipped.`); return; }
+      if (email) {
+        if (email.length > 30) { errors.push(`Row ${i}: Email cannot exceed 30 characters.`); return; }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errors.push(`Row ${i}: Invalid email address.`); return; }
+      }
+      if (phone && !/^[6-9]\d{9}$/.test(phone)) { errors.push(`Row ${i}: Invalid 10-digit phone number.`); return; }
+      if (wordCountServer(address) > 20) { errors.push(`Row ${i}: Address cannot exceed 20 words.`); return; }
+      if (!city) { errors.push(`Row ${i}: City is required.`); return; }
+      if (!/^\d{6}$/.test(pincode)) { errors.push(`Row ${i}: Pincode must be a 6-digit number.`); return; }
+      clientsSheet.addRow({ name, email, phone, gstn, address, createdAt: normalizeDate(new Date()), status, city, pincode });
+      known.add(name.toLowerCase());
+      created += 1;
+    });
+    await writeWorkbookSafe(wb);
+    res.json({ success: true, created, errors });
+  } catch (error) { res.status(400).json({ error: normalizeWorkbookError(error).message }); }
+});
 app.delete('/clients/:name', async (req, res) => {
   try {
     const name = decodeURIComponent(req.params.name);
@@ -832,6 +911,7 @@ app.put('/tasks/:taskId', async (req, res) => {
     const { wb, tasks } = await loadTasks();
     const existing = tasks.find((task) => task.id === req.params.taskId);
     if (!existing) return res.status(404).json({ error: 'Task not found.' });
+    if (existing.status === 'Invoice Cancelled') return res.status(400).json({ error: 'This invoice has been cancelled and cannot be edited.' });
     const updated = buildTask(req.body, existing);
     Object.assign(existing, updated);
     writeTask(existing.row, existing);
@@ -846,6 +926,20 @@ app.put('/tasks/:taskId', async (req, res) => {
     await wb.xlsx.writeFile(dbPathFor(activeCompanyId)); res.json({ success: true });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+app.post('/tasks/:taskId/cancel-invoice', async (req, res) => {
+  try {
+    const { wb, tasks } = await loadTasks();
+    const task = tasks.find((t) => t.id === req.params.taskId);
+    if (!task) return res.status(404).json({ error: 'Task not found.' });
+    if (!task.invoiceNo || task.status !== 'Invoice Generated') return res.status(400).json({ error: 'Only a generated invoice can be cancelled.' });
+    // Cancelling applies to the whole invoice document (every task sharing this invoice number),
+    // not just one line item. The invoice number and all its data are kept — only the status changes.
+    const group = tasks.filter((t) => t.invoiceNo === task.invoiceNo);
+    if (group.some((t) => (t.paymentEntries || []).length > 0)) return res.status(400).json({ error: 'Cannot cancel an invoice with recorded payments. Reverse the payment first.' });
+    group.forEach((t) => { t.status = 'Invoice Cancelled'; writeTask(t.row, t); });
+    await writeWorkbookSafe(wb); res.json({ success: true });
+  } catch (error) { res.status(500).json({ error: normalizeWorkbookError(error).message }); }
+});
 app.post('/generate-invoice', async (req, res) => {
   try {
     const ids = Array.isArray(req.body.taskIds) ? req.body.taskIds : [];
@@ -853,24 +947,26 @@ app.post('/generate-invoice', async (req, res) => {
     const { wb, tasks } = await loadTasks();
     const selected = ids.map((id) => tasks.find((task) => task.id === id)).filter(Boolean);
     if (!selected.length) return res.status(404).json({ error: 'Selected tasks were not found.' });
-    let group = selected; let invoiceNo = ''; let invoiceDate = latestDate(selected); let groupId = '';
+    let group = selected; let invoiceNo = ''; let invoiceDate = latestDate(selected); let groupId = ''; let invoiceFY = '';
     let isRegen = false; let preservedStatus = 'Payment Pending';
     if (selected.length === 1 && selected[0].invoiceNo) {
+      if (selected[0].status === 'Invoice Cancelled') throw new Error('This invoice has been cancelled and cannot be regenerated.');
       invoiceNo = selected[0].invoiceNo; group = tasks.filter((task) => task.invoiceNo === invoiceNo); invoiceDate = latestDate(group); groupId = group[0].invoiceGroupId || invoiceNo;
-      // Re-generation: keep the existing payment status, payment entries and outstanding balance intact.
+      // Re-generation: keep the existing payment status, payment entries, outstanding balance and
+      // financial year intact — only the PDF is re-rendered, the number/FY are never reassigned.
       isRegen = true; preservedStatus = paymentOf(group[0].paymentStatus);
     } else if (selected.length === 1) {
-      invoiceNo = await nextInvoiceNo(wb, selected[0].gst === '18%'); groupId = selected[0].id;
+      ({ invoiceNo, fy: invoiceFY } = await nextInvoiceNo(wb, selected[0].gst === '18%', invoiceDate)); groupId = selected[0].id;
     } else {
       if (new Set(selected.map((task) => task.clientName)).size !== 1) throw new Error('Bulk generation works only when all selected tasks belong to the same client.');
       if (new Set(selected.map((task) => task.gst)).size !== 1) throw new Error('Bulk generation works only when all selected tasks share the same GST setting.');
       if (selected.some((task) => task.invoiceNo || task.status !== 'Invoice Pending')) throw new Error('Bulk generation requires all selected tasks to be Invoice Pending with no invoice number.');
-      invoiceNo = await nextInvoiceNo(wb, selected[0].gst === '18%'); groupId = `GRP-${Date.now()}`;
+      ({ invoiceNo, fy: invoiceFY } = await nextInvoiceNo(wb, selected[0].gst === '18%', invoiceDate)); groupId = `GRP-${Date.now()}`;
     }
     const paymentDisplay = req.body.paymentDisplay || (isRegen ? (group[0].paymentDisplay || null) : null);
     const renderStatus = isRegen ? preservedStatus : 'Payment Pending';
     const rendered = await renderInvoice(group, invoiceNo, invoiceDate, renderStatus, paymentDisplay);
-    group.forEach((task) => { task.invoiceNo = invoiceNo; task.status = 'Invoice Generated'; task.paymentStatus = isRegen ? preservedStatus : 'Payment Pending'; task.invoiceDate = invoiceDate; task.invoiceMonth = rendered.month; task.invoiceFile = rendered.filename; task.invoiceGroupId = groupId || task.invoiceGroupId; task.paymentDisplay = paymentDisplay || ''; writeTask(task.row, task); });
+    group.forEach((task) => { task.invoiceNo = invoiceNo; task.status = 'Invoice Generated'; task.paymentStatus = isRegen ? preservedStatus : 'Payment Pending'; task.invoiceDate = invoiceDate; task.invoiceMonth = rendered.month; if (invoiceFY) task.invoiceFY = invoiceFY; task.invoiceFile = rendered.filename; task.invoiceGroupId = groupId || task.invoiceGroupId; task.paymentDisplay = paymentDisplay || ''; writeTask(task.row, task); });
     await wb.xlsx.writeFile(dbPathFor(activeCompanyId)); res.json({ success: true, invoiceNo, invoiceMonth: rendered.month, filename: rendered.filename });
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
@@ -885,11 +981,11 @@ app.post('/generate-invoice-separate', async (req, res) => {
     if (!eligible.length) return res.status(400).json({ error: 'No eligible pending tasks to generate. Already-invoiced tasks are skipped.' });
     // One invoice per task, each with its own number in its own GST/Non-GST series.
     for (const task of eligible) {
-      const invoiceNo = await nextInvoiceNo(wb, task.gst === '18%');
+      const { invoiceNo, fy } = await nextInvoiceNo(wb, task.gst === '18%', task.date);
       const rendered = await renderInvoice([task], invoiceNo, task.date, 'Payment Pending', paymentDisplay);
       task.invoiceNo = invoiceNo; task.status = 'Invoice Generated'; task.paymentStatus = 'Payment Pending';
       task.invoiceDate = task.date; task.invoiceMonth = rendered.month; task.invoiceFile = rendered.filename;
-      task.invoiceGroupId = task.id; task.paymentDisplay = paymentDisplay || '';
+      task.invoiceGroupId = task.id; task.paymentDisplay = paymentDisplay || ''; task.invoiceFY = fy;
       writeTask(task.row, task);
     }
     await wb.xlsx.writeFile(dbPathFor(activeCompanyId));
@@ -1038,7 +1134,7 @@ app.post('/vouchers', async (req, res) => {
       // Pure advance voucher — full amount is on-account credit.
       advanceAmount = amount;
     }
-    const voucherNo = await nextVoucherNo(wb);
+    const voucherNo = await nextVoucherNo(wb, date);
     voucherSheet.addRow({ voucherNo, date, party, amount, mode, reference, adjustmentType: adjustmentType === 'invoice' ? 'Invoice' : 'Advance', invoiceNo, createdAt: normalizeDate(new Date()), advanceAmount });
 
     // Apply each invoice allocation via the existing payment mechanism. Payment tracking
