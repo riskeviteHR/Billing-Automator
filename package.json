@@ -1,6 +1,6 @@
 {
   "name": "professional-invoice-utility",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Offline generic professional invoice utility",
   "author": "CA Utility",
   "main": "main.js",
