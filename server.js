@@ -860,23 +860,70 @@ app.delete('/clients/:name', async (req, res) => {
     await writeWorkbookSafe(wb); res.json({ success: true });
   } catch (error) { res.status(500).json({ error: normalizeWorkbookError(error).message }); }
 });
+// Reverses any invoice payment(s) a voucher applied — removes its tagged payment entries from
+// every affected invoice group and recomputes their payment status. Payment tracking only; the
+// invoice PDF itself is never re-rendered by voucher activity. Shared by delete and edit.
+function reverseVoucherPayments(tasks, voucherNo) {
+  const groups = {};
+  tasks.forEach((t) => { if (t.invoiceNo) (groups[t.invoiceNo] = groups[t.invoiceNo] || []).push(t); });
+  for (const group of Object.values(groups)) {
+    const entries = group[0].paymentEntries || [];
+    const kept = entries.filter((e) => s(e.voucherNo) !== voucherNo);
+    if (kept.length === entries.length) continue;
+    group.forEach((t) => { t.paymentEntries = kept; });
+    const summary = invoiceSummary(group);
+    const status = summary.outstanding <= 0.005 ? 'Payment Received' : 'Payment Pending';
+    group.forEach((t) => { t.paymentStatus = status; writeTask(t.row, t); });
+  }
+}
+// Computes how a voucher amount is allocated: against the selected invoice first, then the
+// party's other outstanding invoices (oldest first), with any remainder becoming advance credit.
+// Shared by create and edit so both follow identical allocation rules.
+function computeVoucherAllocation(tasks, party, amount, adjustmentType, requestedInvoiceNo) {
+  let invoiceNo = ''; const invoiceAllocations = []; let advanceAmount = 0;
+  if (adjustmentType === 'invoice') {
+    invoiceNo = requestedInvoiceNo;
+    if (!invoiceNo) throw new Error('Select an invoice to adjust against.');
+    const primaryGroup = tasks.filter((task) => task.invoiceNo === invoiceNo);
+    if (!primaryGroup.length || primaryGroup[0].clientName !== party) throw new Error('Invoice does not belong to the selected party.');
+    let remaining = amount;
+    const primaryOutstanding = invoiceSummary(primaryGroup).outstanding;
+    const primaryApplied = Math.min(remaining, primaryOutstanding);
+    if (primaryApplied > 0.005) invoiceAllocations.push({ invoiceNo, amount: primaryApplied });
+    remaining -= primaryApplied;
+    if (remaining > 0.005) {
+      const others = invoiceGroupsOf(tasks)
+        .filter((g) => g.clientName === party && g.invoiceNo !== invoiceNo && g.summary.outstanding > 0.005)
+        .sort((a, b) => (a.invoiceDate || '').localeCompare(b.invoiceDate || ''));
+      for (const g of others) {
+        if (remaining <= 0.005) break;
+        const applied = Math.min(remaining, g.summary.outstanding);
+        invoiceAllocations.push({ invoiceNo: g.invoiceNo, amount: applied });
+        remaining -= applied;
+      }
+    }
+    advanceAmount = remaining > 0.005 ? Number(remaining.toFixed(2)) : 0;
+  } else {
+    advanceAmount = amount;
+  }
+  return { invoiceNo, invoiceAllocations, advanceAmount };
+}
+// Applies computed allocations to their invoice groups via the existing payment mechanism.
+function applyVoucherAllocations(tasks, invoiceAllocations, voucherNo, date) {
+  for (const alloc of invoiceAllocations) {
+    const group = tasks.filter((task) => task.invoiceNo === alloc.invoiceNo);
+    const summary = invoiceSummary(group);
+    const entry = { date, amountReceived: alloc.amount, discountGiven: 0, voucherNo };
+    const outstandingAfter = summary.outstanding - alloc.amount;
+    const paymentStatus = Math.abs(outstandingAfter) < 0.01 || outstandingAfter < 0 ? 'Payment Received' : 'Payment Pending';
+    group.forEach((task) => { task.paymentEntries = [...(group[0].paymentEntries || []), entry]; task.paymentStatus = paymentStatus; writeTask(task.row, task); });
+  }
+}
 app.delete('/vouchers/:voucherNo', async (req, res) => {
   try {
     const voucherNo = decodeURIComponent(req.params.voucherNo);
     const { wb, tasks } = await loadTasks();
-    // Reverse any invoice payment(s) this voucher applied. Payment tracking only — the
-    // invoice PDF itself is never re-rendered by voucher activity.
-    const groups = {};
-    tasks.forEach((t) => { if (t.invoiceNo) (groups[t.invoiceNo] = groups[t.invoiceNo] || []).push(t); });
-    for (const [invoiceNo, group] of Object.entries(groups)) {
-      const entries = group[0].paymentEntries || [];
-      const kept = entries.filter((e) => s(e.voucherNo) !== voucherNo);
-      if (kept.length === entries.length) continue;
-      group.forEach((t) => { t.paymentEntries = kept; });
-      const summary = invoiceSummary(group);
-      const status = summary.outstanding <= 0.005 ? 'Payment Received' : 'Payment Pending';
-      group.forEach((t) => { t.paymentStatus = status; writeTask(t.row, t); });
-    }
+    reverseVoucherPayments(tasks, voucherNo);
     const vsheet = wb.getWorksheet('Vouchers'); if (vsheet) setupVoucherSheet(vsheet);
     let target = null;
     if (vsheet) vsheet.eachRow((row, i) => { if (i > 1 && s(row.getCell(1).value) === voucherNo) target = i; });
@@ -884,6 +931,48 @@ app.delete('/vouchers/:voucherNo', async (req, res) => {
     vsheet.spliceRows(target, 1);
     await writeWorkbookSafe(wb); res.json({ success: true });
   } catch (error) { res.status(500).json({ error: normalizeWorkbookError(error).message }); }
+});
+app.put('/vouchers/:voucherNo', async (req, res) => {
+  try {
+    const voucherNo = decodeURIComponent(req.params.voucherNo);
+    const party = s(req.body.party).trim();
+    const amount = n(req.body.amount);
+    const mode = s(req.body.mode);
+    const adjustmentType = s(req.body.adjustmentType);
+    const reference = s(req.body.reference).trim();
+    const date = normalizeDate(req.body.date) || normalizeDate(new Date());
+    if (!party) return res.status(400).json({ error: 'Party is required.' });
+    if (!(amount > 0)) return res.status(400).json({ error: 'Amount must be greater than zero.' });
+    if (!['Cash', 'Bank'].includes(mode)) return res.status(400).json({ error: 'Payment mode must be Cash or Bank.' });
+    if (!['invoice', 'advance'].includes(adjustmentType)) return res.status(400).json({ error: 'Invalid bill adjustment type.' });
+
+    const { wb, tasks } = await loadTasks();
+    const voucherSheet = wb.getWorksheet('Vouchers'); setupVoucherSheet(voucherSheet);
+    let targetRow = null;
+    voucherSheet.eachRow((row, i) => { if (i > 1 && s(row.getCell(1).value) === voucherNo) targetRow = row; });
+    if (!targetRow) return res.status(404).json({ error: 'Voucher not found.' });
+
+    // Reverse this voucher's existing effect before recomputing against the edited values —
+    // equivalent to delete-then-recreate, but keeps the same voucher number and row.
+    reverseVoucherPayments(tasks, voucherNo);
+    let allocation;
+    try { allocation = computeVoucherAllocation(tasks, party, amount, adjustmentType, s(req.body.invoiceNo).trim()); }
+    catch (err) { return res.status(400).json({ error: err.message }); }
+    const { invoiceNo, invoiceAllocations, advanceAmount } = allocation;
+
+    targetRow.getCell(2).value = date;
+    targetRow.getCell(3).value = party;
+    targetRow.getCell(4).value = amount;
+    targetRow.getCell(5).value = mode;
+    targetRow.getCell(6).value = reference;
+    targetRow.getCell(7).value = adjustmentType === 'invoice' ? 'Invoice' : 'Advance';
+    targetRow.getCell(8).value = invoiceNo;
+    targetRow.getCell(10).value = advanceAmount;
+
+    applyVoucherAllocations(tasks, invoiceAllocations, voucherNo, date);
+    await wb.xlsx.writeFile(dbPathFor(activeCompanyId));
+    res.json({ success: true, voucherNo, invoiceAllocations, advanceAmount });
+  } catch (error) { res.status(400).json({ error: normalizeWorkbookError(error).message }); }
 });
 app.get('/tasks', async (req, res) => {
   try { const { tasks } = await loadTasks(); res.json(tasks.map((task) => ({ ...task, row: undefined })).sort((a, b) => b.date.localeCompare(a.date))); } catch (error) { res.status(500).json({ error: error.message }); }
@@ -1105,52 +1194,13 @@ app.post('/vouchers', async (req, res) => {
     const { wb, tasks } = await loadTasks();
     const voucherSheet = wb.getWorksheet('Vouchers') || wb.addWorksheet('Vouchers');
     setupVoucherSheet(voucherSheet);
-    let invoiceNo = '';
-    const invoiceAllocations = []; // {invoiceNo, amount}
-    let advanceAmount = 0;
-    if (adjustmentType === 'invoice') {
-      invoiceNo = s(req.body.invoiceNo).trim();
-      if (!invoiceNo) return res.status(400).json({ error: 'Select an invoice to adjust against.' });
-      const primaryGroup = tasks.filter((task) => task.invoiceNo === invoiceNo);
-      if (!primaryGroup.length || primaryGroup[0].clientName !== party) return res.status(400).json({ error: 'Invoice does not belong to the selected party.' });
-
-      // Allocation order: selected invoice first, then the party's other pending invoices
-      // (oldest first, FIFO). Any remainder becomes advance credit for the party.
-      let remaining = amount;
-      const primaryOutstanding = invoiceSummary(primaryGroup).outstanding;
-      const primaryApplied = Math.min(remaining, primaryOutstanding);
-      if (primaryApplied > 0.005) invoiceAllocations.push({ invoiceNo, amount: primaryApplied });
-      remaining -= primaryApplied;
-
-      if (remaining > 0.005) {
-        const others = invoiceGroupsOf(tasks)
-          .filter((g) => g.clientName === party && g.invoiceNo !== invoiceNo && g.summary.outstanding > 0.005)
-          .sort((a, b) => (a.invoiceDate || '').localeCompare(b.invoiceDate || ''));
-        for (const g of others) {
-          if (remaining <= 0.005) break;
-          const applied = Math.min(remaining, g.summary.outstanding);
-          invoiceAllocations.push({ invoiceNo: g.invoiceNo, amount: applied });
-          remaining -= applied;
-        }
-      }
-      advanceAmount = remaining > 0.005 ? Number(remaining.toFixed(2)) : 0;
-    } else {
-      // Pure advance voucher — full amount is on-account credit.
-      advanceAmount = amount;
-    }
+    let allocation;
+    try { allocation = computeVoucherAllocation(tasks, party, amount, adjustmentType, s(req.body.invoiceNo).trim()); }
+    catch (err) { return res.status(400).json({ error: err.message }); }
+    const { invoiceNo, invoiceAllocations, advanceAmount } = allocation;
     const voucherNo = await nextVoucherNo(wb, date);
     voucherSheet.addRow({ voucherNo, date, party, amount, mode, reference, adjustmentType: adjustmentType === 'invoice' ? 'Invoice' : 'Advance', invoiceNo, createdAt: normalizeDate(new Date()), advanceAmount });
-
-    // Apply each invoice allocation via the existing payment mechanism. Payment tracking
-    // only — invoice PDFs are never re-rendered or modified by voucher activity.
-    for (const alloc of invoiceAllocations) {
-      const group = tasks.filter((task) => task.invoiceNo === alloc.invoiceNo);
-      const summary = invoiceSummary(group);
-      const entry = { date, amountReceived: alloc.amount, discountGiven: 0, voucherNo };
-      const outstandingAfter = summary.outstanding - alloc.amount;
-      const paymentStatus = Math.abs(outstandingAfter) < 0.01 || outstandingAfter < 0 ? 'Payment Received' : 'Payment Pending';
-      group.forEach((task) => { task.paymentEntries = [...(group[0].paymentEntries || []), entry]; task.paymentStatus = paymentStatus; writeTask(task.row, task); });
-    }
+    applyVoucherAllocations(tasks, invoiceAllocations, voucherNo, date);
     await wb.xlsx.writeFile(dbPathFor(activeCompanyId));
     res.json({ success: true, voucherNo, invoiceAllocations, advanceAmount });
   } catch (error) { res.status(400).json({ error: error.message }); }

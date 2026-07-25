@@ -328,7 +328,7 @@
 
     <div id="voucher-modal" class="modal hidden">
       <div class="modal-content glass-card">
-        <div class="modal-header"><h3>New Voucher</h3><button type="button" class="close-btn" onclick="closeVoucherModal()">&times;</button></div>
+        <div class="modal-header"><h3 id="voucher-modal-title">New Voucher</h3><button type="button" class="close-btn" onclick="closeVoucherModal()">&times;</button></div>
         <form id="voucher-form">
           <div class="form-grid">
             <div class="form-group"><label for="v_date">Date</label><input type="hidden" id="v_date"><input type="text" id="v_date_display" class="date-input" placeholder="dd-mm-yyyy" autocomplete="off" onfocus="openDatePicker('v_date')" oninput="handleDateTyped('v_date', this.value)" onblur="handleDateBlur('v_date')"></div>

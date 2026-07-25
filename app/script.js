@@ -1,5 +1,5 @@
 
-let state = { firm: null, tasks: [], clients: [], companies: [], activeCompanyId: null, gstTab: 'gst', adminUsername: '', report: { type: 'sales' }, categoryFilter: 'all', timeFilter: 'all', timeFrom: '', timeTo: '', vouchers: [], voucherSearch: '', advances: {}, reminders: [], currentTaskId: null, paymentTaskId: null, toastTimer: null, theme: 'light' };
+let state = { firm: null, tasks: [], clients: [], companies: [], activeCompanyId: null, gstTab: 'gst', adminUsername: '', report: { type: 'sales' }, categoryFilter: 'all', timeFilter: 'all', timeFrom: '', timeTo: '', vouchers: [], voucherSearch: '', advances: {}, reminders: [], currentTaskId: null, currentVoucherNo: null, paymentTaskId: null, toastTimer: null, theme: 'light' };
 const RUPEE_SYMBOL = '\u20B9';
 const CATEGORIES = ['ITR Return', 'GST Return', 'Audit', 'Accounting', 'ROC Filing', 'Other'];
 document.addEventListener('DOMContentLoaded', async () => {
@@ -600,7 +600,7 @@ function renderVouchers() {
     }
     const tr = document.createElement('tr');
     const vno = v.voucherNo.replace(/'/g, "\\'");
-    tr.innerHTML = `<td><strong>${escapeHtml(v.voucherNo)}</strong></td><td>${formatDate(v.date)}</td><td>${escapeHtml(v.party)}</td><td>${RUPEE_SYMBOL}${Number(v.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td>${escapeHtml(v.mode)}</td><td>${escapeHtml(v.reference) || '-'}</td><td>${adj}</td><td><button class="btn btn-outline btn-sm btn-danger" onclick="deleteVoucher('${vno}')">Delete</button></td>`;
+    tr.innerHTML = `<td><strong>${escapeHtml(v.voucherNo)}</strong></td><td>${formatDate(v.date)}</td><td>${escapeHtml(v.party)}</td><td>${RUPEE_SYMBOL}${Number(v.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td>${escapeHtml(v.mode)}</td><td>${escapeHtml(v.reference) || '-'}</td><td>${adj}</td><td><button class="btn btn-outline btn-sm" onclick="editVoucher('${vno}')">Edit</button> <button class="btn btn-outline btn-sm btn-danger" onclick="deleteVoucher('${vno}')">Delete</button></td>`;
     tbody.appendChild(tr);
   });
   const empty = document.getElementById('vouchers-empty');
@@ -620,6 +620,8 @@ function renderAdvances() {
 }
 async function showVouchersView() { showView('vouchers-view'); setActiveNav('vouchers'); try { await fetchVouchers(); } catch (error) { showToast(error.message, 'error'); } }
 function showVoucherModal() {
+  state.currentVoucherNo = null;
+  document.getElementById('voucher-modal-title').innerText = 'New Voucher';
   document.getElementById('voucher-form').reset();
   setDateValue('v_date', normalizeDateInput(new Date()));
   const sel = document.getElementById('v_party');
@@ -632,7 +634,34 @@ function showVoucherModal() {
   toggleAdjustmentMode();
   document.getElementById('voucher-modal').classList.remove('hidden');
 }
-function closeVoucherModal() { document.getElementById('voucher-modal').classList.add('hidden'); document.getElementById('voucher-form').reset(); }
+function closeVoucherModal() { document.getElementById('voucher-modal').classList.add('hidden'); document.getElementById('voucher-form').reset(); state.currentVoucherNo = null; }
+async function editVoucher(voucherNo) {
+  const v = state.vouchers.find((item) => item.voucherNo === voucherNo);
+  if (!v) return;
+  showVoucherModal();
+  state.currentVoucherNo = voucherNo;
+  document.getElementById('voucher-modal-title').innerText = `Edit Voucher (${voucherNo})`;
+  setDateValue('v_date', normalizeDateInput(v.date));
+  document.getElementById('v_party').value = v.party;
+  syncComboInput('v_party');
+  document.getElementById('v_amount').value = v.amount;
+  document.getElementById('v_mode').value = v.mode;
+  document.getElementById('v_reference').value = v.reference || '';
+  const isInvoice = v.adjustmentType === 'Invoice';
+  document.getElementById('v_adjust').value = isInvoice ? 'invoice' : 'advance';
+  toggleAdjustmentMode();
+  if (isInvoice) {
+    await onVoucherPartyChange();
+    const sel = document.getElementById('v_invoice');
+    // The invoice this voucher applied to may no longer show as "open" if this voucher is
+    // what settled it — keep it selectable so editing doesn't silently drop the association.
+    if (v.invoiceNo && !Array.from(sel.options).some((o) => o.value === v.invoiceNo)) {
+      const o = document.createElement('option'); o.value = v.invoiceNo; o.innerText = `${v.invoiceNo} (current selection)`; sel.appendChild(o);
+    }
+    sel.value = v.invoiceNo || '';
+    syncComboInput('v_invoice');
+  }
+}
 function currentAdjustMode() { return document.getElementById('v_adjust').value; }
 async function openReceiptEntry(taskId) {
   const task = state.tasks.find((item) => item.id === taskId);
@@ -684,7 +713,10 @@ async function saveVoucher(e) {
   if (!(amount > 0)) return showToast('Enter an amount greater than zero.', 'error');
   if (adjustmentType === 'invoice' && !invoiceNo) return showToast('Select an invoice to adjust against, or choose New Reference.', 'error');
   try {
-    const data = await requestJson('http://localhost:3000/vouchers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: document.getElementById('v_date').value, party, amount, mode: document.getElementById('v_mode').value, reference: document.getElementById('v_reference').value.trim(), adjustmentType, invoiceNo }) }, { title: 'Saving voucher...', message: 'Recording voucher and updating billing.' });
+    const isEdit = !!state.currentVoucherNo;
+    const url = isEdit ? `http://localhost:3000/vouchers/${encodeURIComponent(state.currentVoucherNo)}` : 'http://localhost:3000/vouchers';
+    const method = isEdit ? 'PUT' : 'POST';
+    const data = await requestJson(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: document.getElementById('v_date').value, party, amount, mode: document.getElementById('v_mode').value, reference: document.getElementById('v_reference').value.trim(), adjustmentType, invoiceNo }) }, { title: isEdit ? 'Updating voucher...' : 'Saving voucher...', message: 'Recording voucher and updating billing.' });
     closeVoucherModal();
     await fetchVouchers();
     if (adjustmentType === 'invoice') await fetchTasks(); // keep the dashboard in sync
