@@ -2,6 +2,41 @@
 let state = { firm: null, tasks: [], clients: [], companies: [], activeCompanyId: null, gstTab: 'gst', adminUsername: '', report: { type: 'sales' }, categoryFilter: 'all', timeFilter: 'all', timeFrom: '', timeTo: '', vouchers: [], voucherSearch: '', advances: {}, reminders: [], currentTaskId: null, currentVoucherNo: null, paymentTaskId: null, toastTimer: null, theme: 'light' };
 const RUPEE_SYMBOL = '\u20B9';
 const CATEGORIES = ['ITR Return', 'GST Return', 'Audit', 'Accounting', 'ROC Filing', 'Other'];
+// One entry per released version, newest first — shown in the "What's New" modal (auto-opened
+// once after an update) and the on-demand Help & Version history list.
+const CHANGELOG = [
+  { version: '1.1.0', notes: [
+    'Added a Support & Feedback section in Help & Version — message us on WhatsApp or email us directly.',
+    'The app now shows a "What\'s New" summary automatically after every update.',
+    'Company names are now editable, and invoices show the Company name instead of the separate Organisation Name.',
+    'Auto Reminders now default to OFF for new installs/companies.',
+    'Fixed low-contrast text in the "Include on Invoice" payment-display chooser in dark mode.'
+  ] },
+  { version: '1.0.9', notes: [
+    'Added voucher editing: an Edit button on the Vouchers table opens the voucher form pre-filled, letting you correct the date, party, amount, mode, reference, or bill adjustment.',
+    'Editing a voucher correctly reverses its prior payment allocation and re-applies it based on the edited values, keeping the same voucher number.',
+    'Create, edit, and delete now share the same allocation logic, so behavior stays consistent across all three.'
+  ] },
+  { version: '1.0.8', notes: [
+    'Fixed invoice generation: each task line item now prints as its own row (description, HSN/SAC, amount) instead of being combined into a single row per task.',
+    'Long descriptions wrap cleanly within their column; invoices with many items now flow correctly across multiple pages.',
+    'Applies to invoice PDF generation, printing, downloading, emailing, and WhatsApp sharing — all draw from the same corrected PDF.'
+  ] },
+  { version: '1.0.7', notes: [
+    'Unified searchable comboboxes (client name, debtor/party, invoice number) with keyboard navigation.',
+    'Custom themed calendar for every date field, with day/month/year picking and manual dd-mm-yyyy typing.',
+    'Corrected invoice and voucher numbering to the proper Indian financial year (Apr-Mar), resetting per FY and per series.',
+    'Added a Cancel Invoice status/action, stored Financial Year field, and a Financial Year filter in Reports.',
+    'Added a total bill count to the Primary/Secondary Bills reports.',
+    'Added bulk client upload (template + validated Excel import), alongside the existing bulk task upload.'
+  ] },
+  { version: '1.0.6', notes: [
+    'Renamed GST Bills / Non-GST Bills to Primary Bills / Secondary Bills across the UI.',
+    'Period dropdown: This Month renamed to Current Month, added Previous Month.',
+    'WhatsApp Automation now launches and stays running in the background once licensed.',
+    'Sidebar: added collapse/expand toggle, combined Bills filter into a single All/Primary/Secondary dropdown, removed duplicate company name from the sidebar.'
+  ] }
+];
 document.addEventListener('DOMContentLoaded', async () => {
   loadThemePreference();
   initUpdater();
@@ -331,10 +366,35 @@ function initUpdater() {
   window.updater.getAppVersion().then((v) => {
     const el = document.getElementById('app-version');
     if (el) el.innerText = v || '—';
+    if (v) checkForNewVersionChangelog(v);
   }).catch(() => {});
   window.updater.onStatus((payload) => applyUpdateStatus(payload));
   window.updater.onProgress((payload) => applyUpdateProgress(payload));
 }
+// Shows "What's New" automatically the first time the app opens after an update — compares the
+// running version against the last one the user actually saw (stored locally), not just the last
+// one installed, so it fires exactly once per version bump. Skipped on a fresh install (nothing to
+// compare against yet), since there's nothing "new" to a brand-new user.
+function checkForNewVersionChangelog(currentVersion) {
+  const lastSeen = localStorage.getItem('last-seen-version');
+  localStorage.setItem('last-seen-version', currentVersion);
+  if (!lastSeen || lastSeen === currentVersion) return;
+  showWhatsNewModal();
+}
+function renderChangelogBody(entries) {
+  const body = document.getElementById('whats-new-body');
+  if (!body) return;
+  body.innerHTML = entries.map((entry) => `
+    <div class="changelog-entry">
+      <h4>Version ${escapeHtml(entry.version)}</h4>
+      <ul class="help-list">${entry.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}</ul>
+    </div>`).join('');
+}
+function showWhatsNewModal() {
+  renderChangelogBody(CHANGELOG);
+  document.getElementById('whats-new-modal').classList.remove('hidden');
+}
+function closeWhatsNewModal() { document.getElementById('whats-new-modal').classList.add('hidden'); }
 function applyUpdateStatus(payload) {
   const statusEl = document.getElementById('update-status');
   const checkBtn = document.getElementById('check-update-btn');
@@ -748,9 +808,23 @@ function renderCompanyList() {
     const isActive = company.id === state.activeCompanyId;
     const row = document.createElement('div');
     row.className = 'company-row';
-    row.innerHTML = `<span><strong>${company.name}</strong>${isActive ? ' <span class="badge badge-completed">Active</span>' : ''}</span>${isActive ? '' : `<button type="button" class="btn btn-outline btn-sm" onclick="switchCompany('${company.id.replace(/'/g, "\\'")}')">Switch</button>`}`;
+    const safeId = company.id.replace(/'/g, "\\'");
+    row.innerHTML = `<span><strong>${escapeHtml(company.name)}</strong>${isActive ? ' <span class="badge badge-completed">Active</span>' : ''}</span><div style="display:flex;gap:8px"><button type="button" class="btn btn-outline btn-sm" onclick="editCompanyName('${safeId}')">Edit</button>${isActive ? '' : `<button type="button" class="btn btn-outline btn-sm" onclick="switchCompany('${safeId}')">Switch</button>`}</div>`;
     list.appendChild(row);
   });
+}
+async function editCompanyName(companyId) {
+  const company = state.companies.find((c) => c.id === companyId);
+  if (!company) return;
+  const newName = window.prompt('Rename company', company.name);
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed || trimmed === company.name) return;
+  try {
+    await requestJson(`http://localhost:3000/companies/${encodeURIComponent(companyId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmed }) }, { title: 'Renaming company...', message: 'Updating company name.' });
+    await fetchCompanies();
+    showToast('Company renamed successfully.');
+  } catch (error) { showToast(error.message, 'error'); }
 }
 async function showCompanyModal() { document.getElementById('company-modal').classList.remove('hidden'); try { await fetchCompanies(); } catch (error) { showToast(error.message, 'error'); } }
 function closeCompanyModal() { document.getElementById('company-modal').classList.add('hidden'); document.getElementById('company-form').reset(); }

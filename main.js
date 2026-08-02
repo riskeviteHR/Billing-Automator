@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 
 // Ensure only one instance runs. If a second is launched, focus the existing window and quit.
@@ -36,6 +36,18 @@ function createWindow() {
     title: "CA Invoice Utility - Professional Management Tool",
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'app', 'icon.png')
+  });
+
+  // Support links (WhatsApp, mailto) must open in the system browser/mail app, not inside
+  // this app's own window — the app itself never navigates away from localhost:3000.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('http://localhost:3000')) return;
+    event.preventDefault();
+    shell.openExternal(url);
   });
 
   // Poll until the Express server is accepting connections, then load.

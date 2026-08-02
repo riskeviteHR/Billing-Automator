@@ -62,7 +62,7 @@ const CLIENT_COLUMNS = [
   { header: 'Pincode', key: 'pincode', width: 12 },
   { header: 'Reminders Enabled', key: 'remindersEnabled', width: 16 }
 ];
-const PROFILE_ROWS = [['firm_name', ''], ['partner_name', ''], ['phone', ''], ['email', ''], ['gstn', ''], ['upi_id', ''], ['logo', ''], ['lastInvoiceNo', '0'], ['bank_name', ''], ['bank_account', ''], ['bank_ifsc', ''], ['lastInvoiceNoGST', '0'], ['lastInvoiceNoNonGST', '0'], ['lastVoucherNo', '0'], ['auto_reminders_enabled', '1']];
+const PROFILE_ROWS = [['firm_name', ''], ['partner_name', ''], ['phone', ''], ['email', ''], ['gstn', ''], ['upi_id', ''], ['logo', ''], ['lastInvoiceNo', '0'], ['bank_name', ''], ['bank_account', ''], ['bank_ifsc', ''], ['lastInvoiceNoGST', '0'], ['lastInvoiceNoNonGST', '0'], ['lastVoucherNo', '0'], ['auto_reminders_enabled', '0']];
 const VOUCHER_COLUMNS = [
   { header: 'Voucher No', key: 'voucherNo', width: 20 },
   { header: 'Date', key: 'date', width: 14 },
@@ -705,7 +705,11 @@ async function renderInvoice(tasks, invoiceNo, invoiceDate, paymentStatus, payme
   } else if (paymentDisplay === 'qr' && qrDataUrl) {
     paymentSection = `<div style="margin-top:28px;border:1px solid #cbd5e1;border-radius:10px;padding:16px;background:#f8fafc;display:inline-block"><strong style="color:#5b21b6;display:block;margin-bottom:10px;">Pay via UPI</strong><img src="${qrDataUrl}" width="140" height="140" style="display:block;"/><div style="margin-top:8px;font-size:12px;color:#64748b;">${profile.upi_id}</div></div>`;
   }
-  const html = `<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;color:#1e293b;padding:32px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #5b21b6;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin:24px 0}table.items{table-layout:fixed}table.items td{word-wrap:break-word;overflow-wrap:break-word;}table.items tr{page-break-inside:avoid}thead{display:table-header-group}.meta{display:flex;gap:20px;margin-bottom:24px}.box{flex:1;background:#f8fafc;border-radius:10px;padding:16px}.summary td{padding:8px 0}.summary .total{font-size:18px;font-weight:700;border-top:2px solid #5b21b6}</style></head><body><div class="head"><div><h1 style="margin:0;color:#5b21b6;">${profile.firm_name || ''}</h1><div>${profile.partner_name || ''}</div><div>${profile.phone || ''} | ${profile.email || ''}</div></div><div style="text-align:right"><h2 style="margin:0;color:#5b21b6;">INVOICE</h2><div><strong>No:</strong> ${invoiceNo}</div><div><strong>Date:</strong> ${displayDate(invoiceDate)}</div></div></div><div class="meta"><div class="box"><strong>Bill To</strong><div style="margin-top:8px">${tasks[0].clientName}</div><div>${client.address.replace(/\n/g, '<br>')}</div>${client.city || client.pincode ? `<div>${[client.city, client.pincode].filter(Boolean).join(' - ')}</div>` : ''}<div>${client.phone}</div><div>${client.gstn}</div></div></div><table class="items"><colgroup><col style="width:8%"><col style="width:47%"><col style="width:17%"><col style="width:28%"></colgroup><thead><tr style="background:#1e3a8a;color:#fff"><th style="padding:12px">#</th><th style="padding:12px;text-align:left">Description</th><th style="padding:12px;text-align:center">HSN/SAC</th><th style="padding:12px;text-align:right">Amount (\u20B9)</th></tr></thead><tbody>${rows}</tbody></table><table class="summary" style="margin-left:auto;width:320px"><tr><td>Sub-total</td><td style="text-align:right">\u20B9${summary.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>${summary.gstAmount ? `<tr><td>GST</td><td style="text-align:right">\u20B9${summary.gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}<tr class="total"><td>Total</td><td style="text-align:right">\u20B9${summary.grossTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr></table>${paymentSection}</body></html>`;
+  // The invoice header shows the Company name (from Companies management) instead of the
+  // separately-configured Organisation Name, so the printed invoice matches the active company.
+  const companyRecord = readRegistry()?.companies.find((c) => c.id === activeCompanyId);
+  const invoiceCompanyName = companyRecord?.name || profile.firm_name || '';
+  const html = `<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;color:#1e293b;padding:32px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #5b21b6;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin:24px 0}table.items{table-layout:fixed}table.items td{word-wrap:break-word;overflow-wrap:break-word;}table.items tr{page-break-inside:avoid}thead{display:table-header-group}.meta{display:flex;gap:20px;margin-bottom:24px}.box{flex:1;background:#f8fafc;border-radius:10px;padding:16px}.summary td{padding:8px 0}.summary .total{font-size:18px;font-weight:700;border-top:2px solid #5b21b6}</style></head><body><div class="head"><div><h1 style="margin:0;color:#5b21b6;">${invoiceCompanyName}</h1><div>${profile.partner_name || ''}</div><div>${profile.phone || ''} | ${profile.email || ''}</div></div><div style="text-align:right"><h2 style="margin:0;color:#5b21b6;">INVOICE</h2><div><strong>No:</strong> ${invoiceNo}</div><div><strong>Date:</strong> ${displayDate(invoiceDate)}</div></div></div><div class="meta"><div class="box"><strong>Bill To</strong><div style="margin-top:8px">${tasks[0].clientName}</div><div>${client.address.replace(/\n/g, '<br>')}</div>${client.city || client.pincode ? `<div>${[client.city, client.pincode].filter(Boolean).join(' - ')}</div>` : ''}<div>${client.phone}</div><div>${client.gstn}</div></div></div><table class="items"><colgroup><col style="width:8%"><col style="width:47%"><col style="width:17%"><col style="width:28%"></colgroup><thead><tr style="background:#1e3a8a;color:#fff"><th style="padding:12px">#</th><th style="padding:12px;text-align:left">Description</th><th style="padding:12px;text-align:center">HSN/SAC</th><th style="padding:12px;text-align:right">Amount (\u20B9)</th></tr></thead><tbody>${rows}</tbody></table><table class="summary" style="margin-left:auto;width:320px"><tr><td>Sub-total</td><td style="text-align:right">\u20B9${summary.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>${summary.gstAmount ? `<tr><td>GST</td><td style="text-align:right">\u20B9${summary.gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}<tr class="total"><td>Total</td><td style="text-align:right">\u20B9${summary.grossTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr></table>${paymentSection}</body></html>`;
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: 'networkidle0' });
   await page.pdf({ path: filePath, format: 'A4', printBackground: true, margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' } });
@@ -733,6 +737,19 @@ app.post('/companies', async (req, res) => {
     activeCompanyId = companyId;
     await initExcelDB(); // create the workbook now so the frontend's next /profile call can't hit a missing file
     res.json({ success: true, companyId });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.put('/companies/:companyId', async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'Company name is required.' });
+    const registry = readRegistry();
+    if (!registry) return res.status(500).json({ error: 'Company registry not initialised.' });
+    const company = registry.companies.find((c) => c.id === req.params.companyId);
+    if (!company) return res.status(404).json({ error: 'Unknown company.' });
+    company.name = name;
+    writeRegistry(registry);
+    res.json({ success: true });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 app.post('/companies/switch', async (req, res) => {

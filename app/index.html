@@ -258,6 +258,7 @@
         <div class="table-header-flex">
           <div><h3>App Updates</h3><p class="subtle">Version <span id="app-version">—</span></p></div>
           <div class="toolbar compact">
+            <button type="button" class="btn btn-outline btn-sm" onclick="showWhatsNewModal()">What's New</button>
             <button type="button" class="btn btn-outline btn-sm" id="check-update-btn" onclick="checkForUpdates()">Check for Updates</button>
             <button type="button" class="btn btn-primary btn-sm hidden" id="restart-update-btn" onclick="restartAndUpdate()">Restart and Update</button>
           </div>
@@ -266,6 +267,14 @@
         <div id="update-progress-wrap" class="update-progress-wrap hidden">
           <div class="update-progress-bar"><div id="update-progress-fill" class="update-progress-fill" style="width:0%"></div></div>
           <span id="update-progress-label" class="update-progress-label">0%</span>
+        </div>
+      </div>
+      <div class="glass-card help-card">
+        <h3>Support &amp; Feedback</h3>
+        <p>Have a question, found a bug, or want to request a feature? Reach out directly — we usually respond quickly.</p>
+        <div class="toolbar compact" style="margin-top:14px;">
+          <a class="btn btn-primary" href="https://wa.me/918077788518" target="_blank" rel="noopener">WhatsApp: 8077 788 518</a>
+          <a class="btn btn-outline" href="mailto:tools@soxmate.com">Email: tools@soxmate.com</a>
         </div>
       </div>
       <div class="glass-card help-card">
@@ -480,6 +489,14 @@
         </div>
         <div id="client-bulk-result" class="bulk-result hidden"></div>
         <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeClientBulkUploadModal()">Cancel</button><button type="button" class="btn btn-primary" onclick="submitClientBulkUpload()">Upload Clients</button></div>
+      </div>
+    </div>
+
+    <div id="whats-new-modal" class="modal hidden">
+      <div class="modal-content glass-card">
+        <div class="modal-header"><h3 id="whats-new-title">What's New</h3><button type="button" class="close-btn" onclick="closeWhatsNewModal()">&times;</button></div>
+        <div id="whats-new-body" class="table-scroll" style="max-height:60vh;"></div>
+        <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="closeWhatsNewModal()">Got it</button></div>
       </div>
     </div>
 
