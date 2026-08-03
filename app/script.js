@@ -5,6 +5,9 @@ const CATEGORIES = ['ITR Return', 'GST Return', 'Audit', 'Accounting', 'ROC Fili
 // One entry per released version, newest first — shown in the "What's New" modal (auto-opened
 // once after an update) and the on-demand Help & Version history list.
 const CHANGELOG = [
+  { version: '1.1.1', notes: [
+    'Fixed "Not authenticated" error when opening a downloaded invoice — it now opens correctly inside the app again instead of your system browser.'
+  ] },
   { version: '1.1.0', notes: [
     'Added a Support & Feedback section in Help & Version — message us on WhatsApp or email us directly.',
     'The app now shows a "What\'s New" summary automatically after every update.',

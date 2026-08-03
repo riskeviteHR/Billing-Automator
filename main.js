@@ -38,9 +38,12 @@ function createWindow() {
     icon: path.join(__dirname, 'app', 'icon.png')
   });
 
-  // Support links (WhatsApp, mailto) must open in the system browser/mail app, not inside
-  // this app's own window — the app itself never navigates away from localhost:3000.
+  // Support links (WhatsApp, mailto) must open in the system browser/mail app. Internal
+  // links (e.g. the invoice PDF viewer) must stay inside the app so they keep the user's
+  // logged-in session — routing those to the system browser loses the session cookie and
+  // shows "Not authenticated" instead of the invoice.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://localhost:3000')) return { action: 'allow' };
     shell.openExternal(url);
     return { action: 'deny' };
   });
