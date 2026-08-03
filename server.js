@@ -241,7 +241,7 @@ function runWhatsappAutomation(excelPath) {
     });
   });
 }
-// ---- Keep WhatsApp Automation running continuously once the app is licensed -----
+// ---- Launch WhatsApp Automation once the app is licensed, without repeatedly relaunching it -----
 let waWatchdogStarted = false;
 function isWaAutomationRunning() {
   return new Promise((resolve) => {
@@ -272,13 +272,15 @@ async function ensureWaAutomationRunning() {
     console.error('WhatsApp automation watchdog check failed:', err.message);
   }
 }
-// Launches the WA Automation app in the background if it isn't already open, then
-// re-checks every 5 minutes so it keeps running continuously instead of a one-off start.
+// Launches the WA Automation app in the background once, right after license activation, so
+// it's ready without the user needing to click anything first. Deliberately does NOT keep
+// re-launching it on a timer if the user closes it — Auto Reminders already opens it on its
+// own whenever it actually needs to send something, so forcing the window back open
+// repeatedly isn't necessary and was interrupting users every few minutes.
 function startWaAutomationWatchdog() {
   if (waWatchdogStarted) return;
   waWatchdogStarted = true;
   ensureWaAutomationRunning();
-  setInterval(ensureWaAutomationRunning, 5 * 60 * 1000);
 }
 function normalizeDate(v) {
   if (!v) return '';

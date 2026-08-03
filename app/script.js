@@ -5,6 +5,9 @@ const CATEGORIES = ['ITR Return', 'GST Return', 'Audit', 'Accounting', 'ROC Fili
 // One entry per released version, newest first — shown in the "What's New" modal (auto-opened
 // once after an update) and the on-demand Help & Version history list.
 const CHANGELOG = [
+  { version: '1.1.2', notes: [
+    'Fixed WhatsApp Automation repeatedly popping its window back open every few minutes. It now launches once in the background after activation and stays out of your way — Auto Reminders still opens it automatically whenever it actually needs to send something.'
+  ] },
   { version: '1.1.1', notes: [
     'Fixed "Not authenticated" error when opening a downloaded invoice — it now opens correctly inside the app again instead of your system browser.'
   ] },
