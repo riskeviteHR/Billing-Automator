@@ -5,6 +5,11 @@ const CATEGORIES = ['ITR Return', 'GST Return', 'Audit', 'Accounting', 'ROC Fili
 // One entry per released version, newest first — shown in the "What's New" modal (auto-opened
 // once after an update) and the on-demand Help & Version history list.
 const CHANGELOG = [
+  { version: '1.1.3', notes: [
+    'Added optional Organisation Address and Bank Address fields to organisation settings — both now appear on generated invoices when filled in.',
+    'A newly created company no longer shows as "Default Company" — it automatically takes your real Organisation Name as soon as you finish onboarding.',
+    'Added a "Home" button in the sidebar to jump straight back to the main dashboard from any screen.'
+  ] },
   { version: '1.1.2', notes: [
     'Fixed WhatsApp Automation repeatedly popping its window back open every few minutes. It now launches once in the background after activation and stays out of your way — Auto Reminders still opens it automatically whenever it actually needs to send something.'
   ] },
@@ -171,7 +176,7 @@ function setupActivationListeners() {
 async function loadInitialData() {
   const profile = await getJson('http://localhost:3000/profile');
   if (!profile.firm_name) return showView('onboarding-view');
-  state.firm = { name: profile.firm_name, partner: profile.partner_name, phone: profile.phone, email: profile.email, gstn: profile.gstn, upi_id: profile.upi_id, logo: profile.logo, bank_name: profile.bank_name, bank_account: profile.bank_account, bank_ifsc: profile.bank_ifsc };
+  state.firm = { name: profile.firm_name, partner: profile.partner_name, phone: profile.phone, email: profile.email, gstn: profile.gstn, upi_id: profile.upi_id, logo: profile.logo, bank_name: profile.bank_name, bank_account: profile.bank_account, bank_ifsc: profile.bank_ifsc, org_address: profile.org_address, bank_address: profile.bank_address };
   await Promise.all([fetchTasks(), fetchClients(), populateDashboardCompanySelect()]);
   updateDashboardInfo();
   showView('dashboard-view');
@@ -277,7 +282,7 @@ function setupEventListeners() {
     e.preventDefault();
     const logoInput = document.getElementById('logo');
     const save = async (logo) => {
-      await fetch('http://localhost:3000/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firm_name: document.getElementById('firm_name').value, partner_name: document.getElementById('partner_name').value, phone: document.getElementById('phone').value, email: document.getElementById('email').value, gstn: document.getElementById('gstn').value, upi_id: document.getElementById('upi_id_setup').value, logo, bank_name: document.getElementById('bank_name').value, bank_account: document.getElementById('bank_account').value, bank_ifsc: document.getElementById('bank_ifsc').value }) });
+      await fetch('http://localhost:3000/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firm_name: document.getElementById('firm_name').value, partner_name: document.getElementById('partner_name').value, phone: document.getElementById('phone').value, email: document.getElementById('email').value, gstn: document.getElementById('gstn').value, upi_id: document.getElementById('upi_id_setup').value, logo, org_address: document.getElementById('org_address').value, bank_name: document.getElementById('bank_name').value, bank_account: document.getElementById('bank_account').value, bank_ifsc: document.getElementById('bank_ifsc').value, bank_address: document.getElementById('bank_address').value }) });
       await loadInitialData();
     };
     if (logoInput.files && logoInput.files[0]) { const reader = new FileReader(); reader.onload = (ev) => save(ev.target.result); reader.readAsDataURL(logoInput.files[0]); } else await save(state.firm?.logo || '');
@@ -445,7 +450,7 @@ function restartAndUpdate() {
   window.updater.restartAndInstall();
 }
 function updateDashboardInfo() { document.getElementById('display-firm-name').innerText = state.firm.name; document.getElementById('display-partner-name').innerText = `Owner: ${state.firm.partner}`; }
-function showSettings() { document.getElementById('firm_name').value = state.firm.name || ''; document.getElementById('partner_name').value = state.firm.partner || ''; document.getElementById('phone').value = state.firm.phone || ''; document.getElementById('email').value = state.firm.email || ''; document.getElementById('gstn').value = state.firm.gstn || ''; document.getElementById('upi_id_setup').value = state.firm.upi_id || ''; document.getElementById('bank_name').value = state.firm.bank_name || ''; document.getElementById('bank_account').value = state.firm.bank_account || ''; document.getElementById('bank_ifsc').value = state.firm.bank_ifsc || ''; showView('onboarding-view'); setActiveNav('settings'); }
+function showSettings() { document.getElementById('firm_name').value = state.firm.name || ''; document.getElementById('partner_name').value = state.firm.partner || ''; document.getElementById('phone').value = state.firm.phone || ''; document.getElementById('email').value = state.firm.email || ''; document.getElementById('gstn').value = state.firm.gstn || ''; document.getElementById('upi_id_setup').value = state.firm.upi_id || ''; document.getElementById('org_address').value = state.firm.org_address || ''; document.getElementById('bank_name').value = state.firm.bank_name || ''; document.getElementById('bank_account').value = state.firm.bank_account || ''; document.getElementById('bank_ifsc').value = state.firm.bank_ifsc || ''; document.getElementById('bank_address').value = state.firm.bank_address || ''; showView('onboarding-view'); setActiveNav('settings'); }
 function updateClientSelects() { const select = document.getElementById('client_select'); while (select.options.length > 2) select.remove(2); state.clients.forEach((client) => { const option = document.createElement('option'); option.value = client.name; option.innerText = client.name; select.appendChild(option); }); resetSelectSearch('client_select'); }
 function showClientsView() { fetchClients(); showView('clients-view'); setActiveNav('clients'); }
 function showReportsView() {

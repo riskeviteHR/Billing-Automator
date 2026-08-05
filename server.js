@@ -62,7 +62,7 @@ const CLIENT_COLUMNS = [
   { header: 'Pincode', key: 'pincode', width: 12 },
   { header: 'Reminders Enabled', key: 'remindersEnabled', width: 16 }
 ];
-const PROFILE_ROWS = [['firm_name', ''], ['partner_name', ''], ['phone', ''], ['email', ''], ['gstn', ''], ['upi_id', ''], ['logo', ''], ['lastInvoiceNo', '0'], ['bank_name', ''], ['bank_account', ''], ['bank_ifsc', ''], ['lastInvoiceNoGST', '0'], ['lastInvoiceNoNonGST', '0'], ['lastVoucherNo', '0'], ['auto_reminders_enabled', '0']];
+const PROFILE_ROWS = [['firm_name', ''], ['partner_name', ''], ['phone', ''], ['email', ''], ['gstn', ''], ['upi_id', ''], ['logo', ''], ['lastInvoiceNo', '0'], ['bank_name', ''], ['bank_account', ''], ['bank_ifsc', ''], ['lastInvoiceNoGST', '0'], ['lastInvoiceNoNonGST', '0'], ['lastVoucherNo', '0'], ['auto_reminders_enabled', '0'], ['org_address', ''], ['bank_address', '']];
 const VOUCHER_COLUMNS = [
   { header: 'Voucher No', key: 'voucherNo', width: 20 },
   { header: 'Date', key: 'date', width: 14 },
@@ -703,7 +703,7 @@ async function renderInvoice(tasks, invoiceNo, invoiceDate, paymentStatus, payme
   const browser = await launchPdfBrowser();
   let paymentSection = '';
   if (paymentDisplay === 'bank' && (profile.bank_name || profile.bank_account || profile.bank_ifsc)) {
-    paymentSection = `<div style="margin-top:28px;border:1px solid #cbd5e1;border-radius:10px;padding:16px;background:#f8fafc"><strong style="color:#5b21b6;">Payment Details</strong><table style="margin:10px 0 0;width:auto;border-collapse:collapse"><tr><td style="padding:4px 12px 4px 0;color:#64748b;font-size:13px;">Bank Name</td><td style="padding:4px 0;font-weight:700;">${profile.bank_name || ''}</td></tr><tr><td style="padding:4px 12px 4px 0;color:#64748b;font-size:13px;">Account No.</td><td style="padding:4px 0;font-weight:700;">${profile.bank_account || ''}</td></tr><tr><td style="padding:4px 12px 4px 0;color:#64748b;font-size:13px;">IFSC Code</td><td style="padding:4px 0;font-weight:700;">${profile.bank_ifsc || ''}</td></tr></table></div>`;
+    paymentSection = `<div style="margin-top:28px;border:1px solid #cbd5e1;border-radius:10px;padding:16px;background:#f8fafc"><strong style="color:#5b21b6;">Payment Details</strong><table style="margin:10px 0 0;width:auto;border-collapse:collapse"><tr><td style="padding:4px 12px 4px 0;color:#64748b;font-size:13px;">Bank Name</td><td style="padding:4px 0;font-weight:700;">${profile.bank_name || ''}</td></tr><tr><td style="padding:4px 12px 4px 0;color:#64748b;font-size:13px;">Account No.</td><td style="padding:4px 0;font-weight:700;">${profile.bank_account || ''}</td></tr><tr><td style="padding:4px 12px 4px 0;color:#64748b;font-size:13px;">IFSC Code</td><td style="padding:4px 0;font-weight:700;">${profile.bank_ifsc || ''}</td></tr>${profile.bank_address ? `<tr><td style="padding:4px 12px 4px 0;color:#64748b;font-size:13px;vertical-align:top;">Bank Address</td><td style="padding:4px 0;font-weight:700;">${profile.bank_address.replace(/\n/g, '<br>')}</td></tr>` : ''}</table></div>`;
   } else if (paymentDisplay === 'qr' && qrDataUrl) {
     paymentSection = `<div style="margin-top:28px;border:1px solid #cbd5e1;border-radius:10px;padding:16px;background:#f8fafc;display:inline-block"><strong style="color:#5b21b6;display:block;margin-bottom:10px;">Pay via UPI</strong><img src="${qrDataUrl}" width="140" height="140" style="display:block;"/><div style="margin-top:8px;font-size:12px;color:#64748b;">${profile.upi_id}</div></div>`;
   }
@@ -711,7 +711,7 @@ async function renderInvoice(tasks, invoiceNo, invoiceDate, paymentStatus, payme
   // separately-configured Organisation Name, so the printed invoice matches the active company.
   const companyRecord = readRegistry()?.companies.find((c) => c.id === activeCompanyId);
   const invoiceCompanyName = companyRecord?.name || profile.firm_name || '';
-  const html = `<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;color:#1e293b;padding:32px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #5b21b6;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin:24px 0}table.items{table-layout:fixed}table.items td{word-wrap:break-word;overflow-wrap:break-word;}table.items tr{page-break-inside:avoid}thead{display:table-header-group}.meta{display:flex;gap:20px;margin-bottom:24px}.box{flex:1;background:#f8fafc;border-radius:10px;padding:16px}.summary td{padding:8px 0}.summary .total{font-size:18px;font-weight:700;border-top:2px solid #5b21b6}</style></head><body><div class="head"><div><h1 style="margin:0;color:#5b21b6;">${invoiceCompanyName}</h1><div>${profile.partner_name || ''}</div><div>${profile.phone || ''} | ${profile.email || ''}</div></div><div style="text-align:right"><h2 style="margin:0;color:#5b21b6;">INVOICE</h2><div><strong>No:</strong> ${invoiceNo}</div><div><strong>Date:</strong> ${displayDate(invoiceDate)}</div></div></div><div class="meta"><div class="box"><strong>Bill To</strong><div style="margin-top:8px">${tasks[0].clientName}</div><div>${client.address.replace(/\n/g, '<br>')}</div>${client.city || client.pincode ? `<div>${[client.city, client.pincode].filter(Boolean).join(' - ')}</div>` : ''}<div>${client.phone}</div><div>${client.gstn}</div></div></div><table class="items"><colgroup><col style="width:8%"><col style="width:47%"><col style="width:17%"><col style="width:28%"></colgroup><thead><tr style="background:#1e3a8a;color:#fff"><th style="padding:12px">#</th><th style="padding:12px;text-align:left">Description</th><th style="padding:12px;text-align:center">HSN/SAC</th><th style="padding:12px;text-align:right">Amount (\u20B9)</th></tr></thead><tbody>${rows}</tbody></table><table class="summary" style="margin-left:auto;width:320px"><tr><td>Sub-total</td><td style="text-align:right">\u20B9${summary.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>${summary.gstAmount ? `<tr><td>GST</td><td style="text-align:right">\u20B9${summary.gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}<tr class="total"><td>Total</td><td style="text-align:right">\u20B9${summary.grossTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr></table>${paymentSection}</body></html>`;
+  const html = `<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;color:#1e293b;padding:32px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #5b21b6;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin:24px 0}table.items{table-layout:fixed}table.items td{word-wrap:break-word;overflow-wrap:break-word;}table.items tr{page-break-inside:avoid}thead{display:table-header-group}.meta{display:flex;gap:20px;margin-bottom:24px}.box{flex:1;background:#f8fafc;border-radius:10px;padding:16px}.summary td{padding:8px 0}.summary .total{font-size:18px;font-weight:700;border-top:2px solid #5b21b6}</style></head><body><div class="head"><div><h1 style="margin:0;color:#5b21b6;">${invoiceCompanyName}</h1><div>${profile.partner_name || ''}</div>${profile.org_address ? `<div>${profile.org_address.replace(/\n/g, '<br>')}</div>` : ''}<div>${profile.phone || ''} | ${profile.email || ''}</div></div><div style="text-align:right"><h2 style="margin:0;color:#5b21b6;">INVOICE</h2><div><strong>No:</strong> ${invoiceNo}</div><div><strong>Date:</strong> ${displayDate(invoiceDate)}</div></div></div><div class="meta"><div class="box"><strong>Bill To</strong><div style="margin-top:8px">${tasks[0].clientName}</div><div>${client.address.replace(/\n/g, '<br>')}</div>${client.city || client.pincode ? `<div>${[client.city, client.pincode].filter(Boolean).join(' - ')}</div>` : ''}<div>${client.phone}</div><div>${client.gstn}</div></div></div><table class="items"><colgroup><col style="width:8%"><col style="width:47%"><col style="width:17%"><col style="width:28%"></colgroup><thead><tr style="background:#1e3a8a;color:#fff"><th style="padding:12px">#</th><th style="padding:12px;text-align:left">Description</th><th style="padding:12px;text-align:center">HSN/SAC</th><th style="padding:12px;text-align:right">Amount (\u20B9)</th></tr></thead><tbody>${rows}</tbody></table><table class="summary" style="margin-left:auto;width:320px"><tr><td>Sub-total</td><td style="text-align:right">\u20B9${summary.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>${summary.gstAmount ? `<tr><td>GST</td><td style="text-align:right">\u20B9${summary.gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}<tr class="total"><td>Total</td><td style="text-align:right">\u20B9${summary.grossTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr></table>${paymentSection}</body></html>`;
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: 'networkidle0' });
   await page.pdf({ path: filePath, format: 'A4', printBackground: true, margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' } });
@@ -773,7 +773,20 @@ app.post('/profile', async (req, res) => {
     const wb = await loadWorkbook();
     const sheet = wb.getWorksheet('Profile');
     sheet.eachRow((row, i) => { if (i > 1) { const key = row.getCell(1).value; if (req.body[key] !== undefined) row.getCell(2).value = req.body[key]; } });
-    await writeWorkbookSafe(wb); res.json({ success: true });
+    await writeWorkbookSafe(wb);
+    // A company that hasn't been explicitly named yet (fresh-install placeholder, or an
+    // old "Default Company" auto-seed) takes its display name from the Organisation Name
+    // the user just entered, so no generic placeholder is ever left showing.
+    const firmName = String(req.body.firm_name || '').trim();
+    if (firmName) {
+      const registry = readRegistry();
+      const company = registry?.companies.find((c) => c.id === activeCompanyId);
+      if (company && (!company.name || company.name === 'Default Company')) {
+        company.name = firmName;
+        writeRegistry(registry);
+      }
+    }
+    res.json({ success: true });
   } catch (error) { res.status(500).json({ error: normalizeWorkbookError(error).message }); }
 });
 app.get('/clients', async (req, res) => {
@@ -1397,7 +1410,7 @@ async function migrateToCompanies() {
   // Case B: legacy single-company layout — move it into a company folder once.
   const legacyDbPath = path.join(DESKTOP_PATH, 'Invoice_Database.xlsx');
   if (fs.existsSync(legacyDbPath)) {
-    let firmName = 'Default Company';
+    let firmName = '';
     try {
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.readFile(legacyDbPath);
@@ -1424,10 +1437,13 @@ async function migrateToCompanies() {
     activeCompanyId = companyId;
     return;
   }
-  // Case C: fresh install — same zero-config first run as before, one level deeper.
+  // Case C: fresh install — a company folder must still exist so onboarding's first
+  // /profile save has somewhere to write, but it starts unnamed. The name is filled in
+  // automatically from the Organisation Name the user enters on the onboarding screen
+  // (see the sync in app.post('/profile')) — no generic placeholder is ever shown.
   const companyId = 'default-company';
   ensureDir(companyDir(companyId));
-  writeRegistry({ companies: [{ id: companyId, name: 'Default Company', createdAt: normalizeDate(new Date()) }], activeCompanyId: companyId });
+  writeRegistry({ companies: [{ id: companyId, name: '', createdAt: normalizeDate(new Date()) }], activeCompanyId: companyId });
   activeCompanyId = companyId;
 }
 // ---- Auto Reminders ----------------------------------------------------------

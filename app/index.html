@@ -74,6 +74,7 @@
         </div>
       </div>
       <div class="sidebar-section">Navigation</div>
+      <button type="button" class="side-item" data-nav="dashboard" onclick="navGst('all')">Home</button>
       <button type="button" class="side-item" data-nav="reports" onclick="showReportsView()">Reports</button>
       <button type="button" class="side-item" data-nav="reminders" onclick="showRemindersView()">Auto Reminders</button>
       <button type="button" class="side-item" data-nav="vouchers" onclick="showVouchersView()">Vouchers</button>
@@ -101,9 +102,11 @@
             <div class="form-group"><label>Email Address</label><input type="email" id="email" required></div>
             <div class="form-group"><label>GSTN</label><input type="text" id="gstn"></div>
             <div class="form-group"><label>UPI ID</label><input type="text" id="upi_id_setup"></div>
+            <div class="form-group full"><label>Organisation Address (optional)</label><input type="text" id="org_address" placeholder="e.g. 123 MG Road, Bengaluru"></div>
             <div class="form-group"><label>Bank Name</label><input type="text" id="bank_name" placeholder="e.g. State Bank of India"></div>
             <div class="form-group"><label>Bank Account Number</label><input type="text" id="bank_account" placeholder="Account number"></div>
             <div class="form-group"><label>Bank IFSC Code</label><input type="text" id="bank_ifsc" placeholder="e.g. SBIN0001234"></div>
+            <div class="form-group full"><label>Bank Address (optional)</label><input type="text" id="bank_address" placeholder="e.g. Branch address"></div>
             <div class="form-group full"><label>Organisation Logo</label><input type="file" id="logo" accept="image/*"><div id="logo-preview"></div></div>
           </div>
           <button type="submit" class="btn btn-primary">Save & Continue</button>
