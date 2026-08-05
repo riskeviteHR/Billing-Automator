@@ -5,6 +5,10 @@ const CATEGORIES = ['ITR Return', 'GST Return', 'Audit', 'Accounting', 'ROC Fili
 // One entry per released version, newest first — shown in the "What's New" modal (auto-opened
 // once after an update) and the on-demand Help & Version history list.
 const CHANGELOG = [
+  { version: '1.1.5', notes: [
+    'Updated the WhatsApp support number in Help & Version.',
+    'Fixed the Vouchers table Edit/Delete buttons overlapping each other on narrower screens.'
+  ] },
   { version: '1.1.4', notes: [
     'Generated invoices now show your organisation\'s GSTIN under the firm header.'
   ] },
@@ -674,7 +678,7 @@ function renderVouchers() {
     }
     const tr = document.createElement('tr');
     const vno = v.voucherNo.replace(/'/g, "\\'");
-    tr.innerHTML = `<td><strong>${escapeHtml(v.voucherNo)}</strong></td><td>${formatDate(v.date)}</td><td>${escapeHtml(v.party)}</td><td>${RUPEE_SYMBOL}${Number(v.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td>${escapeHtml(v.mode)}</td><td>${escapeHtml(v.reference) || '-'}</td><td>${adj}</td><td><button class="btn btn-outline btn-sm" onclick="editVoucher('${vno}')">Edit</button> <button class="btn btn-outline btn-sm btn-danger" onclick="deleteVoucher('${vno}')">Delete</button></td>`;
+    tr.innerHTML = `<td><strong>${escapeHtml(v.voucherNo)}</strong></td><td>${formatDate(v.date)}</td><td>${escapeHtml(v.party)}</td><td>${RUPEE_SYMBOL}${Number(v.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td>${escapeHtml(v.mode)}</td><td>${escapeHtml(v.reference) || '-'}</td><td>${adj}</td><td class="client-actions"><button class="btn btn-outline btn-sm" onclick="editVoucher('${vno}')">Edit</button><button class="btn btn-outline btn-sm btn-danger" onclick="deleteVoucher('${vno}')">Delete</button></td>`;
     tbody.appendChild(tr);
   });
   const empty = document.getElementById('vouchers-empty');
