@@ -5,6 +5,9 @@ const CATEGORIES = ['ITR Return', 'GST Return', 'Audit', 'Accounting', 'ROC Fili
 // One entry per released version, newest first — shown in the "What's New" modal (auto-opened
 // once after an update) and the on-demand Help & Version history list.
 const CHANGELOG = [
+  { version: '1.1.4', notes: [
+    'Generated invoices now show your organisation\'s GSTIN under the firm header.'
+  ] },
   { version: '1.1.3', notes: [
     'Added optional Organisation Address and Bank Address fields to organisation settings — both now appear on generated invoices when filled in.',
     'A newly created company no longer shows as "Default Company" — it automatically takes your real Organisation Name as soon as you finish onboarding.',
