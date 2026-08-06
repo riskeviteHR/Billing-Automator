@@ -13,8 +13,88 @@ const licenseManager = require('./license-manager');
 const adminAuth = require('./admin-auth');
 const app = express();
 const PORT = 3000;
-const GST_RATE = 0.18;
-const DESKTOP_PATH = path.join(os.homedir(), 'Desktop', 'Invoices Utility');
+// ---- Centralized GST configuration -------------------------------------------
+// Single source of truth for GST rates. IGST is intra-state CGST + SGST/UTGST
+// combined (per GST law they always sum to the same total rate), so it is
+// derived rather than duplicated — change CGST/SGST here and both the total
+// rate and the inter-state rate update everywhere automatically.
+const GST_RATES = { CGST: 0.09, SGST_UTGST: 0.09 };
+const GST_TOTAL_RATE = GST_RATES.CGST + GST_RATES.SGST_UTGST; // 0.18 today — same total used for both flows
+const GST_RATE = GST_TOTAL_RATE; // kept for any legacy references; identical value, same behavior as before
+// Official GST state/UT codes — the first two digits of every 15-digit GSTIN.
+const GST_STATE_CODES = {
+  '01': 'Jammu and Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh',
+  '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh',
+  '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh', '13': 'Nagaland', '14': 'Manipur',
+  '15': 'Mizoram', '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal',
+  '20': 'Jharkhand', '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat',
+  '25': 'Daman and Diu', '26': 'Dadra and Nagar Haveli', '27': 'Maharashtra', '28': 'Andhra Pradesh (Old)',
+  '29': 'Karnataka', '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu',
+  '34': 'Puducherry', '35': 'Andaman and Nicobar Islands', '36': 'Telangana', '37': 'Andhra Pradesh',
+  '38': 'Ladakh', '97': 'Other Territory', '99': 'Centre Jurisdiction'
+};
+const STATE_NAME_TO_CODE = Object.fromEntries(Object.entries(GST_STATE_CODES).map(([code, name]) => [name.toLowerCase(), code]));
+// Best-effort PIN code first-2-digit -> state code fallback, used only when a
+// client has no GSTN and their City field can't be matched to a state name.
+// India Post postal-circle boundaries don't map 1:1 to GST states, so this is
+// approximate — GSTN and City-name matching are always tried first.
+const PINCODE_PREFIX_TO_STATE = {
+  11: '07', 12: '06', 13: '06', 14: '03', 15: '03', 16: '04', 17: '02', 18: '01', 19: '01',
+  20: '09', 21: '09', 22: '09', 23: '09', 24: '09', 25: '09', 26: '05', 28: '09',
+  30: '08', 31: '08', 32: '08', 33: '08', 34: '08',
+  36: '24', 37: '24', 38: '24', 39: '24',
+  40: '27', 41: '27', 42: '27', 43: '27', 44: '27',
+  45: '23', 46: '23', 47: '23', 48: '23', 49: '22',
+  50: '36', 51: '36', 52: '37', 53: '37',
+  56: '29', 57: '29', 58: '29', 59: '29',
+  60: '33', 61: '33', 62: '33', 63: '33', 64: '33',
+  67: '32', 68: '32', 69: '32',
+  70: '19', 71: '19', 72: '19', 73: '19', 74: '19',
+  75: '21', 76: '21', 77: '21',
+  78: '18', 79: '18',
+  80: '10', 81: '10', 82: '20', 83: '20', 84: '10', 85: '10',
+};
+function stateCodeFromGstin(gstin) { const clean = String(gstin || '').trim(); return /^\d{2}/.test(clean) && GST_STATE_CODES[clean.slice(0, 2)] ? clean.slice(0, 2) : null; }
+function stateCodeFromCityText(cityText) {
+  const clean = String(cityText || '').trim().toLowerCase();
+  if (!clean) return null;
+  if (STATE_NAME_TO_CODE[clean]) return STATE_NAME_TO_CODE[clean];
+  const match = Object.keys(STATE_NAME_TO_CODE).find((name) => clean.includes(name));
+  return match ? STATE_NAME_TO_CODE[match] : null;
+}
+function stateCodeFromPincode(pincode) { const prefix = String(pincode || '').trim().slice(0, 2); return /^\d{2}$/.test(prefix) ? (PINCODE_PREFIX_TO_STATE[Number(prefix)] || null) : null; }
+// Place-of-supply state for a client: GSTN prefix is authoritative when present,
+// then the City field (often holds a state name in this app's data), then a
+// best-effort pincode lookup. Returns null if none resolve — callers should
+// treat null as "same state as supplier" (the safest assumption).
+function resolveClientStateCode(client) {
+  return stateCodeFromGstin(client?.gstn) || stateCodeFromCityText(client?.city) || stateCodeFromPincode(client?.pincode) || null;
+}
+// Splits an already-computed GST amount into CGST+SGST or IGST based on whether
+// the supplier and place-of-supply state codes match. The total always equals
+// gstAmount exactly (CGST + SGST_UTGST === the total rate by construction), so
+// this never changes any stored invoice/task total — only how it's displayed.
+function gstBreakdown(gstAmount, supplierStateCode, clientStateCode) {
+  const posCode = clientStateCode || supplierStateCode || null;
+  const sameState = !supplierStateCode || !posCode || supplierStateCode === posCode;
+  const splitRatio = GST_RATES.CGST / GST_TOTAL_RATE;
+  return {
+    sameState,
+    supplierState: supplierStateCode ? GST_STATE_CODES[supplierStateCode] || null : null,
+    placeOfSupplyState: posCode ? GST_STATE_CODES[posCode] || null : null,
+    cgst: sameState ? gstAmount * splitRatio : 0,
+    sgst: sameState ? gstAmount * (1 - splitRatio) : 0,
+    igst: sameState ? 0 : gstAmount,
+    cgstRate: GST_RATES.CGST, sgstRate: GST_RATES.SGST_UTGST, igstRate: GST_TOTAL_RATE
+  };
+}
+// The packaged app always runs this file inside Electron (main.js requires it directly).
+// Running it any other way — `node server.js` / `npm start`, exactly how local dev/testing
+// servers are launched — is never the real production app, so it gets its own data folder.
+// This guarantees dev-server testing can never read, write, or overwrite real company data.
+const IS_PACKAGED_APP = !!process.versions.electron;
+const DESKTOP_PATH = path.join(os.homedir(), 'Desktop', IS_PACKAGED_APP ? 'Invoices Utility' : 'Invoices Utility (Dev - Test Data Only)');
+if (!IS_PACKAGED_APP) console.warn(`[dev mode] Using isolated test data folder, not the real app's data: ${DESKTOP_PATH}`);
 const COMPANIES_ROOT = path.join(DESKTOP_PATH, 'Companies');
 const REGISTRY_PATH = path.join(DESKTOP_PATH, 'companies.json');
 let activeCompanyId = null; // resolved by migrateToCompanies() before the server starts
@@ -711,7 +791,17 @@ async function renderInvoice(tasks, invoiceNo, invoiceDate, paymentStatus, payme
   // separately-configured Organisation Name, so the printed invoice matches the active company.
   const companyRecord = readRegistry()?.companies.find((c) => c.id === activeCompanyId);
   const invoiceCompanyName = companyRecord?.name || profile.firm_name || '';
-  const html = `<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;color:#1e293b;padding:32px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #5b21b6;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin:24px 0}table.items{table-layout:fixed}table.items td{word-wrap:break-word;overflow-wrap:break-word;}table.items tr{page-break-inside:avoid}thead{display:table-header-group}.meta{display:flex;gap:20px;margin-bottom:24px}.box{flex:1;background:#f8fafc;border-radius:10px;padding:16px}.summary td{padding:8px 0}.summary .total{font-size:18px;font-weight:700;border-top:2px solid #5b21b6}</style></head><body><div class="head"><div><h1 style="margin:0;color:#5b21b6;">${invoiceCompanyName}</h1><div>${profile.partner_name || ''}</div>${profile.org_address ? `<div>${profile.org_address.replace(/\n/g, '<br>')}</div>` : ''}<div>${profile.phone || ''} | ${profile.email || ''}</div>${profile.gstn ? `<div><strong>GSTIN:</strong> ${profile.gstn}</div>` : ''}</div><div style="text-align:right"><h2 style="margin:0;color:#5b21b6;">INVOICE</h2><div><strong>No:</strong> ${invoiceNo}</div><div><strong>Date:</strong> ${displayDate(invoiceDate)}</div></div></div><div class="meta"><div class="box"><strong>Bill To</strong><div style="margin-top:8px">${tasks[0].clientName}</div><div>${client.address.replace(/\n/g, '<br>')}</div>${client.city || client.pincode ? `<div>${[client.city, client.pincode].filter(Boolean).join(' - ')}</div>` : ''}<div>${client.phone}</div><div>${client.gstn}</div></div></div><table class="items"><colgroup><col style="width:8%"><col style="width:47%"><col style="width:17%"><col style="width:28%"></colgroup><thead><tr style="background:#1e3a8a;color:#fff"><th style="padding:12px">#</th><th style="padding:12px;text-align:left">Description</th><th style="padding:12px;text-align:center">HSN/SAC</th><th style="padding:12px;text-align:right">Amount (\u20B9)</th></tr></thead><tbody>${rows}</tbody></table><table class="summary" style="margin-left:auto;width:320px"><tr><td>Sub-total</td><td style="text-align:right">\u20B9${summary.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>${summary.gstAmount ? `<tr><td>GST</td><td style="text-align:right">\u20B9${summary.gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}<tr class="total"><td>Total</td><td style="text-align:right">\u20B9${summary.grossTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr></table>${paymentSection}</body></html>`;
+  // Normalized GST split: CGST+SGST for intra-state, IGST for inter-state, based on
+  // the supplier's and the client's place-of-supply state codes (see GST_RATES/
+  // resolveClientStateCode near the top of this file for the centralized config).
+  const supplierStateCode = stateCodeFromGstin(profile.gstn);
+  const clientStateCode = resolveClientStateCode(client);
+  const breakdown = summary.gstAmount ? gstBreakdown(summary.gstAmount, supplierStateCode, clientStateCode) : null;
+  const gstRows = !breakdown ? '' : breakdown.sameState
+    ? `<tr><td>CGST (${(breakdown.cgstRate * 100).toFixed(0)}%)</td><td style="text-align:right">\u20B9${breakdown.cgst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr><tr><td>SGST/UTGST (${(breakdown.sgstRate * 100).toFixed(0)}%)</td><td style="text-align:right">\u20B9${breakdown.sgst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>`
+    : `<tr><td>IGST (${(breakdown.igstRate * 100).toFixed(0)}%)</td><td style="text-align:right">\u20B9${breakdown.igst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>`;
+  const placeOfSupplyLine = breakdown?.placeOfSupplyState ? `<div>Place of Supply: ${breakdown.placeOfSupplyState}</div>` : '';
+  const html = `<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;color:#1e293b;padding:32px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #5b21b6;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin:24px 0}table.items{table-layout:fixed}table.items td{word-wrap:break-word;overflow-wrap:break-word;}table.items tr{page-break-inside:avoid}thead{display:table-header-group}.meta{display:flex;gap:20px;margin-bottom:24px}.box{flex:1;background:#f8fafc;border-radius:10px;padding:16px}.summary td{padding:8px 0}.summary .total{font-size:18px;font-weight:700;border-top:2px solid #5b21b6}</style></head><body><div class="head"><div><h1 style="margin:0;color:#5b21b6;">${invoiceCompanyName}</h1><div>${profile.partner_name || ''}</div>${profile.org_address ? `<div>${profile.org_address.replace(/\n/g, '<br>')}</div>` : ''}<div>${profile.phone || ''} | ${profile.email || ''}</div>${profile.gstn ? `<div><strong>GSTIN:</strong> ${profile.gstn}</div>` : ''}</div><div style="text-align:right"><h2 style="margin:0;color:#5b21b6;">INVOICE</h2><div><strong>No:</strong> ${invoiceNo}</div><div><strong>Date:</strong> ${displayDate(invoiceDate)}</div></div></div><div class="meta"><div class="box"><strong>Bill To</strong><div style="margin-top:8px">${tasks[0].clientName}</div><div>${client.address.replace(/\n/g, '<br>')}</div>${client.city || client.pincode ? `<div>${[client.city, client.pincode].filter(Boolean).join(' - ')}</div>` : ''}<div>${client.phone}</div><div>${client.gstn}</div>${placeOfSupplyLine}</div></div><table class="items"><colgroup><col style="width:8%"><col style="width:47%"><col style="width:17%"><col style="width:28%"></colgroup><thead><tr style="background:#1e3a8a;color:#fff"><th style="padding:12px">#</th><th style="padding:12px;text-align:left">Description</th><th style="padding:12px;text-align:center">HSN/SAC</th><th style="padding:12px;text-align:right">Amount (\u20B9)</th></tr></thead><tbody>${rows}</tbody></table><table class="summary" style="margin-left:auto;width:320px"><tr><td>Sub-total</td><td style="text-align:right">\u20B9${summary.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>${gstRows}<tr class="total"><td>Total</td><td style="text-align:right">\u20B9${summary.grossTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr></table>${paymentSection}</body></html>`;
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: 'networkidle0' });
   await page.pdf({ path: filePath, format: 'A4', printBackground: true, margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' } });
