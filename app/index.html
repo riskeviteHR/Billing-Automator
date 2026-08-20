@@ -113,6 +113,7 @@
             <div class="form-group"><label>SMTP Username (email address)</label><input type="text" id="smtp_user" placeholder="you@yourfirm.com" autocomplete="off"></div>
             <div class="form-group"><label>SMTP Password / App Password</label><input type="password" id="smtp_pass" placeholder="•••••••••••" autocomplete="new-password"></div>
             <div class="form-group full"><label class="switch-label" style="font-weight:400;">Use SSL/TLS (secure connection — usually on for port 465)<label class="switch"><input type="checkbox" id="smtp_secure" checked><span class="slider round"></span></label></label></div>
+            <div class="form-group full"><label class="switch-label" style="font-weight:400;">Getting a "certificate" error when sending? Turn this on.<label class="switch"><input type="checkbox" id="smtp_skip_verify"><span class="slider round"></span></label></label></div>
             <div class="form-group full"><button type="button" class="btn btn-outline btn-sm" onclick="testSmtpConnection()">Test Email Connection</button> <span id="smtp-test-status" class="subtle"></span></div>
             <div class="form-group full"><label>Organisation Logo</label><input type="file" id="logo" accept="image/*"><div id="logo-preview"></div></div>
           </div>

@@ -161,7 +161,7 @@ const CLIENT_COLUMNS = [
   { header: 'Pincode', key: 'pincode', width: 12 },
   { header: 'Reminders Enabled', key: 'remindersEnabled', width: 16 }
 ];
-const PROFILE_ROWS = [['firm_name', ''], ['partner_name', ''], ['phone', ''], ['email', ''], ['gstn', ''], ['upi_id', ''], ['logo', ''], ['lastInvoiceNo', '0'], ['bank_name', ''], ['bank_account', ''], ['bank_ifsc', ''], ['lastInvoiceNoGST', '0'], ['lastInvoiceNoNonGST', '0'], ['lastVoucherNo', '0'], ['auto_reminders_enabled', '0'], ['org_address', ''], ['bank_address', ''], ['smtp_host', ''], ['smtp_port', '465'], ['smtp_user', ''], ['smtp_pass', ''], ['smtp_secure', '1']];
+const PROFILE_ROWS = [['firm_name', ''], ['partner_name', ''], ['phone', ''], ['email', ''], ['gstn', ''], ['upi_id', ''], ['logo', ''], ['lastInvoiceNo', '0'], ['bank_name', ''], ['bank_account', ''], ['bank_ifsc', ''], ['lastInvoiceNoGST', '0'], ['lastInvoiceNoNonGST', '0'], ['lastVoucherNo', '0'], ['auto_reminders_enabled', '0'], ['org_address', ''], ['bank_address', ''], ['smtp_host', ''], ['smtp_port', '465'], ['smtp_user', ''], ['smtp_pass', ''], ['smtp_secure', '1'], ['smtp_skip_verify', '0']];
 const VOUCHER_COLUMNS = [
   { header: 'Voucher No', key: 'voucherNo', width: 20 },
   { header: 'Date', key: 'date', width: 14 },
@@ -1512,7 +1512,13 @@ function buildMailTransporter(profile) {
     host: profile.smtp_host,
     port: parseInt(profile.smtp_port, 10) || 465,
     secure: profile.smtp_secure !== '0',
-    auth: { user: profile.smtp_user, pass: profile.smtp_pass }
+    auth: { user: profile.smtp_user, pass: profile.smtp_pass },
+    // Off by default. Some antivirus/firewall software intercepts encrypted connections
+    // and re-signs them with its own locally-installed certificate — trusted by Windows/the
+    // browser, but not by Node, which then refuses the connection with a "self signed
+    // certificate in certificate chain" error even though the mail server itself is fine.
+    // Turning this on tells Node to stop checking, matching what the OS already trusts.
+    tls: profile.smtp_skip_verify === '1' ? { rejectUnauthorized: false } : undefined
   });
 }
 app.post('/test-smtp', async (req, res) => {
