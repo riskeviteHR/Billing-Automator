@@ -8,6 +8,7 @@ const { exec, execFile, spawn } = require('child_process');
 const ExcelJS = require('exceljs');
 const puppeteer = require('puppeteer');
 const QRCode = require('qrcode');
+const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const licenseManager = require('./license-manager');
 const adminAuth = require('./admin-auth');
@@ -93,7 +94,25 @@ function gstBreakdown(gstAmount, supplierStateCode, clientStateCode) {
 // servers are launched — is never the real production app, so it gets its own data folder.
 // This guarantees dev-server testing can never read, write, or overwrite real company data.
 const IS_PACKAGED_APP = !!process.versions.electron;
-const DESKTOP_PATH = path.join(os.homedir(), 'Desktop', IS_PACKAGED_APP ? 'Invoices Utility' : 'Invoices Utility (Dev - Test Data Only)');
+// Optional per-machine override (set via Help & Version > Data Location) so a user can point
+// the app at a OneDrive/Google Drive/any synced folder to share one data root across machines.
+// Stored outside the data folder itself (avoids a chicken-and-egg problem) and only ever
+// consulted for the real packaged app — dev/test runs always use the isolated test folder
+// regardless. When no config file exists (every install up to now), this returns null and
+// DESKTOP_PATH resolves to the exact same default path as before: zero effect on existing users.
+const DATA_LOCATION_CONFIG_PATH = path.join(os.homedir(), '.ca_invoice_data_location.json');
+function readCustomDataPath() {
+  try {
+    if (fs.existsSync(DATA_LOCATION_CONFIG_PATH)) {
+      const cfg = JSON.parse(fs.readFileSync(DATA_LOCATION_CONFIG_PATH, 'utf8'));
+      if (cfg && typeof cfg.dataPath === 'string' && cfg.dataPath.trim()) return cfg.dataPath.trim();
+    }
+  } catch (e) { console.error('Could not read data location config, using default:', e); }
+  return null;
+}
+const DESKTOP_PATH = !IS_PACKAGED_APP
+  ? path.join(os.homedir(), 'Desktop', 'Invoices Utility (Dev - Test Data Only)')
+  : (readCustomDataPath() || path.join(os.homedir(), 'Desktop', 'Invoices Utility'));
 if (!IS_PACKAGED_APP) console.warn(`[dev mode] Using isolated test data folder, not the real app's data: ${DESKTOP_PATH}`);
 const COMPANIES_ROOT = path.join(DESKTOP_PATH, 'Companies');
 const REGISTRY_PATH = path.join(DESKTOP_PATH, 'companies.json');
@@ -142,7 +161,7 @@ const CLIENT_COLUMNS = [
   { header: 'Pincode', key: 'pincode', width: 12 },
   { header: 'Reminders Enabled', key: 'remindersEnabled', width: 16 }
 ];
-const PROFILE_ROWS = [['firm_name', ''], ['partner_name', ''], ['phone', ''], ['email', ''], ['gstn', ''], ['upi_id', ''], ['logo', ''], ['lastInvoiceNo', '0'], ['bank_name', ''], ['bank_account', ''], ['bank_ifsc', ''], ['lastInvoiceNoGST', '0'], ['lastInvoiceNoNonGST', '0'], ['lastVoucherNo', '0'], ['auto_reminders_enabled', '0'], ['org_address', ''], ['bank_address', '']];
+const PROFILE_ROWS = [['firm_name', ''], ['partner_name', ''], ['phone', ''], ['email', ''], ['gstn', ''], ['upi_id', ''], ['logo', ''], ['lastInvoiceNo', '0'], ['bank_name', ''], ['bank_account', ''], ['bank_ifsc', ''], ['lastInvoiceNoGST', '0'], ['lastInvoiceNoNonGST', '0'], ['lastVoucherNo', '0'], ['auto_reminders_enabled', '0'], ['org_address', ''], ['bank_address', ''], ['smtp_host', ''], ['smtp_port', '465'], ['smtp_user', ''], ['smtp_pass', ''], ['smtp_secure', '1']];
 const VOUCHER_COLUMNS = [
   { header: 'Voucher No', key: 'voucherNo', width: 20 },
   { header: 'Date', key: 'date', width: 14 },
@@ -801,13 +820,55 @@ async function renderInvoice(tasks, invoiceNo, invoiceDate, paymentStatus, payme
     ? `<tr><td>CGST (${(breakdown.cgstRate * 100).toFixed(0)}%)</td><td style="text-align:right">\u20B9${breakdown.cgst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr><tr><td>SGST/UTGST (${(breakdown.sgstRate * 100).toFixed(0)}%)</td><td style="text-align:right">\u20B9${breakdown.sgst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>`
     : `<tr><td>IGST (${(breakdown.igstRate * 100).toFixed(0)}%)</td><td style="text-align:right">\u20B9${breakdown.igst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>`;
   const placeOfSupplyLine = breakdown?.placeOfSupplyState ? `<div>Place of Supply: ${breakdown.placeOfSupplyState}</div>` : '';
-  const html = `<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;color:#1e293b;padding:32px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #5b21b6;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin:24px 0}table.items{table-layout:fixed}table.items td{word-wrap:break-word;overflow-wrap:break-word;}table.items tr{page-break-inside:avoid}thead{display:table-header-group}.meta{display:flex;gap:20px;margin-bottom:24px}.box{flex:1;background:#f8fafc;border-radius:10px;padding:16px}.summary td{padding:8px 0}.summary .total{font-size:18px;font-weight:700;border-top:2px solid #5b21b6}</style></head><body><div class="head"><div><h1 style="margin:0;color:#5b21b6;">${invoiceCompanyName}</h1><div>${profile.partner_name || ''}</div>${profile.org_address ? `<div>${profile.org_address.replace(/\n/g, '<br>')}</div>` : ''}<div>${profile.phone || ''} | ${profile.email || ''}</div>${profile.gstn ? `<div><strong>GSTIN:</strong> ${profile.gstn}</div>` : ''}</div><div style="text-align:right"><h2 style="margin:0;color:#5b21b6;">INVOICE</h2><div><strong>No:</strong> ${invoiceNo}</div><div><strong>Date:</strong> ${displayDate(invoiceDate)}</div></div></div><div class="meta"><div class="box"><strong>Bill To</strong><div style="margin-top:8px">${tasks[0].clientName}</div><div>${client.address.replace(/\n/g, '<br>')}</div>${client.city || client.pincode ? `<div>${[client.city, client.pincode].filter(Boolean).join(' - ')}</div>` : ''}<div>${client.phone}</div><div>${client.gstn}</div>${placeOfSupplyLine}</div></div><table class="items"><colgroup><col style="width:8%"><col style="width:47%"><col style="width:17%"><col style="width:28%"></colgroup><thead><tr style="background:#1e3a8a;color:#fff"><th style="padding:12px">#</th><th style="padding:12px;text-align:left">Description</th><th style="padding:12px;text-align:center">HSN/SAC</th><th style="padding:12px;text-align:right">Amount (\u20B9)</th></tr></thead><tbody>${rows}</tbody></table><table class="summary" style="margin-left:auto;width:320px"><tr><td>Sub-total</td><td style="text-align:right">\u20B9${summary.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>${gstRows}<tr class="total"><td>Total</td><td style="text-align:right">\u20B9${summary.grossTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr></table>${paymentSection}</body></html>`;
+  const html = `<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;color:#1e293b;padding:32px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #5b21b6;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin:24px 0}table.items{table-layout:fixed}table.items td{word-wrap:break-word;overflow-wrap:break-word;}table.items tr{page-break-inside:avoid}thead{display:table-header-group}.meta{display:flex;gap:20px;margin-bottom:24px}.box{flex:1;background:#f8fafc;border-radius:10px;padding:16px}.summary td{padding:8px 0}.summary .total{font-size:18px;font-weight:700;border-top:2px solid #5b21b6}</style></head><body><div class="head"><div>${profile.logo ? `<img src="${profile.logo}" alt="Logo" style="max-height:56px;max-width:180px;object-fit:contain;display:block;margin-bottom:8px;">` : ''}<h1 style="margin:0;color:#5b21b6;">${invoiceCompanyName}</h1><div>${profile.partner_name || ''}</div>${profile.org_address ? `<div>${profile.org_address.replace(/\n/g, '<br>')}</div>` : ''}<div>${profile.phone || ''} | ${profile.email || ''}</div>${profile.gstn ? `<div><strong>GSTIN:</strong> ${profile.gstn}</div>` : ''}</div><div style="text-align:right"><h2 style="margin:0;color:#5b21b6;">INVOICE</h2><div><strong>No:</strong> ${invoiceNo}</div><div><strong>Date:</strong> ${displayDate(invoiceDate)}</div></div></div><div class="meta"><div class="box"><strong>Bill To</strong><div style="margin-top:8px">${tasks[0].clientName}</div><div>${client.address.replace(/\n/g, '<br>')}</div>${client.city || client.pincode ? `<div>${[client.city, client.pincode].filter(Boolean).join(' - ')}</div>` : ''}<div>${client.phone}</div><div>${client.gstn}</div>${placeOfSupplyLine}</div></div><table class="items"><colgroup><col style="width:8%"><col style="width:47%"><col style="width:17%"><col style="width:28%"></colgroup><thead><tr style="background:#1e3a8a;color:#fff"><th style="padding:12px">#</th><th style="padding:12px;text-align:left">Description</th><th style="padding:12px;text-align:center">HSN/SAC</th><th style="padding:12px;text-align:right">Amount (\u20B9)</th></tr></thead><tbody>${rows}</tbody></table><table class="summary" style="margin-left:auto;width:320px"><tr><td>Sub-total</td><td style="text-align:right">\u20B9${summary.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>${gstRows}<tr class="total"><td>Total</td><td style="text-align:right">\u20B9${summary.grossTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr></table>${paymentSection}</body></html>`;
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: 'networkidle0' });
   await page.pdf({ path: filePath, format: 'A4', printBackground: true, margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' } });
   await browser.close();
   return { month, filename };
 }
+// Best-effort detection of already-installed sync-client folders (OneDrive, Google Drive
+// Desktop in "Mirror files" mode) directly under the user's home directory, so the Data
+// Location UI can offer one-click suggestions instead of requiring a hand-typed path — the
+// #1 source of typo-driven mistakes here. Google Drive's own links/folder IDs are irrelevant:
+// once its desktop client mirrors a folder locally, it's a completely normal filesystem path,
+// which is all this ever needed. Purely additive — manual path entry still works exactly as
+// before if nothing is detected or the user wants a different location.
+function detectSyncFolders() {
+  const home = os.homedir();
+  let entries = [];
+  try { entries = fs.readdirSync(home, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch { /* ignore */ }
+  const found = [];
+  for (const name of entries) {
+    if (/^onedrive/i.test(name)) found.push({ label: `OneDrive (${name})`, path: path.join(home, name, 'Invoices Utility') });
+    else if (/^(my drive|google drive|googledrive)$/i.test(name)) found.push({ label: `Google Drive (${name})`, path: path.join(home, name, 'Invoices Utility') });
+  }
+  return found;
+}
+app.get('/data-location', (req, res) => {
+  res.json({ currentPath: DESKTOP_PATH, isCustom: IS_PACKAGED_APP && !!readCustomDataPath(), isPackagedApp: IS_PACKAGED_APP, suggestions: IS_PACKAGED_APP ? detectSyncFolders() : [] });
+});
+app.post('/data-location', async (req, res) => {
+  try {
+    if (!IS_PACKAGED_APP) return res.status(400).json({ error: 'Data location can only be changed in the installed app, not during local dev/testing.' });
+    const newPath = String(req.body.path || '').trim();
+    if (!newPath) return res.status(400).json({ error: 'Please enter a folder path.' });
+    const normalizedNew = path.resolve(newPath);
+    const normalizedCurrent = path.resolve(DESKTOP_PATH);
+    if (normalizedNew === normalizedCurrent) return res.status(400).json({ error: 'That is already the current data location.' });
+    ensureDir(normalizedNew);
+    const targetHasData = fs.existsSync(path.join(normalizedNew, 'companies.json'));
+    if (!targetHasData) {
+      // Nothing at the destination yet — move everything there so no data is left behind
+      // or duplicated. If the destination already has data (e.g. this is a second machine
+      // pointing at a folder another machine already set up via sync), adopt it as-is instead.
+      const entries = fs.existsSync(normalizedCurrent) ? fs.readdirSync(normalizedCurrent) : [];
+      for (const entry of entries) fs.renameSync(path.join(normalizedCurrent, entry), path.join(normalizedNew, entry));
+    }
+    fs.writeFileSync(DATA_LOCATION_CONFIG_PATH, JSON.stringify({ dataPath: normalizedNew }, null, 2), 'utf8');
+    res.json({ success: true, movedExistingData: !targetHasData, restartRequired: true });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
 app.get('/companies', (req, res) => {
   try {
     const registry = readRegistry();
@@ -1440,6 +1501,61 @@ app.post('/generate-reminder-excel', async (req, res) => {
     req.body.tasks.forEach((task) => { if (!task.invoiceNo || !task.invoiceFile || !task.invoiceMonth) return; if (!reminderGroups[task.invoiceNo]) reminderGroups[task.invoiceNo] = { ...task, combinedTotal: 0 }; reminderGroups[task.invoiceNo].combinedTotal += n(task.total); });
     Object.values(reminderGroups).forEach((group) => { sheet.addRow({ name: group.clientName, phone: group.phone || '', message: `Dear ${group.clientName},\n\nThis is a friendly reminder regarding the payment for invoice ${group.invoiceNo} (Total: \u20B9${group.combinedTotal.toLocaleString('en-IN')}). If you have already processed the payment, please ignore this message.\n\nRegards,\n${req.body.firmName}`, path: path.join(invoiceRootFor(activeCompanyId), group.invoiceMonth, group.invoiceFile) }); });
     wb.addWorksheet('Message Logs'); const file = path.join(whatsappRootFor(activeCompanyId), `Reminders_${new Date().toLocaleDateString('en-IN').replace(/\//g, '-')}_${new Date().toLocaleTimeString('en-IN').replace(/:/g, '-').replace(/ /g, '_')}.xlsx`); await wb.xlsx.writeFile(file); res.json({ success: true, path: file });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+// Builds an SMTP transporter from the profile's saved settings (Settings > Email/SMTP).
+// Returns null when nothing's configured yet, so callers can show a clear setup prompt
+// instead of a raw connection error.
+function buildMailTransporter(profile) {
+  if (!profile.smtp_host || !profile.smtp_user || !profile.smtp_pass) return null;
+  return nodemailer.createTransport({
+    host: profile.smtp_host,
+    port: parseInt(profile.smtp_port, 10) || 465,
+    secure: profile.smtp_secure !== '0',
+    auth: { user: profile.smtp_user, pass: profile.smtp_pass }
+  });
+}
+app.post('/test-smtp', async (req, res) => {
+  try {
+    const profile = await readProfile();
+    const transporter = buildMailTransporter(profile);
+    if (!transporter) return res.status(400).json({ error: 'Fill in SMTP Host, Username and Password below, click Save, then test.' });
+    await transporter.verify();
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.post('/send-invoice-email', async (req, res) => {
+  try {
+    const profile = await readProfile();
+    const transporter = buildMailTransporter(profile);
+    if (!transporter) return res.status(400).json({ error: "Email sending isn't set up yet — add your SMTP details in Settings first." });
+    // Same one-row-per-task -> group-by-invoice pattern as the WhatsApp/reminder exports above,
+    // so a multi-line-item invoice sends as a single email rather than one per task row.
+    const invoiceGroups = {};
+    (req.body.tasks || []).forEach((task) => { if (!task.invoiceNo || !task.invoiceFile || !task.invoiceMonth) return; if (!invoiceGroups[task.invoiceNo]) invoiceGroups[task.invoiceNo] = { ...task, combinedTotal: 0 }; invoiceGroups[task.invoiceNo].combinedTotal += n(task.total); });
+    const groups = Object.values(invoiceGroups);
+    if (!groups.length) return res.status(400).json({ error: 'No generated invoices in the selection.' });
+    const companyRecord = readRegistry()?.companies.find((c) => c.id === activeCompanyId);
+    const companyName = companyRecord?.name || profile.firm_name || '';
+    const results = [];
+    for (const group of groups) {
+      if (!group.email) { results.push({ invoiceNo: group.invoiceNo, client: group.clientName, success: false, error: 'No email on file for this client.' }); continue; }
+      const pdfPath = path.join(invoiceRootFor(activeCompanyId), group.invoiceMonth, group.invoiceFile);
+      if (!fs.existsSync(pdfPath)) { results.push({ invoiceNo: group.invoiceNo, client: group.clientName, success: false, error: 'Invoice PDF not found on disk.' }); continue; }
+      try {
+        await transporter.sendMail({
+          from: `"${companyName}" <${profile.smtp_user}>`,
+          to: group.email,
+          subject: `Invoice ${group.invoiceNo} from ${companyName}`,
+          text: `Dear ${group.clientName},\n\nPlease find attached invoice ${group.invoiceNo} for ₹${group.combinedTotal.toLocaleString('en-IN')}.\n\nRegards,\n${companyName}`,
+          attachments: [{ filename: group.invoiceFile, path: pdfPath }]
+        });
+        results.push({ invoiceNo: group.invoiceNo, client: group.clientName, success: true });
+      } catch (error) {
+        results.push({ invoiceNo: group.invoiceNo, client: group.clientName, success: false, error: error.message });
+      }
+    }
+    res.json({ success: true, results, sentCount: results.filter((r) => r.success).length, failedCount: results.filter((r) => !r.success).length });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 app.post('/run-whatsapp-automation', async (req, res) => {

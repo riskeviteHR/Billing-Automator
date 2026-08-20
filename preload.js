@@ -18,3 +18,7 @@ contextBridge.exposeInMainWorld('updater', {
   onStatus: (callback) => subscribe(UPDATE_STATUS_CHANNEL, callback),
   onProgress: (callback) => subscribe(UPDATE_PROGRESS_CHANNEL, callback)
 });
+
+contextBridge.exposeInMainWorld('appControl', {
+  relaunch: () => ipcRenderer.send('app:relaunch')
+});

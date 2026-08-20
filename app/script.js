@@ -35,6 +35,14 @@ function gstFlowLabel(client) {
 // One entry per released version, newest first — shown in the "What's New" modal (auto-opened
 // once after an update) and the on-demand Help & Version history list.
 const CHANGELOG = [
+  { version: '1.1.7', notes: [
+    'Added a Data Location setting (Help & Version) — point your data at a OneDrive/Google Drive-synced folder to share it across your devices, with one-click detection of folders already on your machine.',
+    'Your organisation logo now appears on generated invoices, with a live preview when you upload it in Settings.',
+    'Invoices can now be emailed directly to clients with the PDF attached — set up your email (SMTP) details in Settings, test the connection, then select invoices and click Email.',
+    'The Party Ledger report\'s client picker is now searchable instead of a long scrolling list.',
+    { text: 'What\'s New popup entries can now be selectively hidden from customers — internal/technical notes stay out of this list going forward.', visible: false },
+    'Refreshed the Help & Version guide with all of the above, plus a full pass on getting-started details.'
+  ] },
   { version: '1.1.6', notes: [
     'Invoices now show a proper GST breakdown — CGST + SGST for same-state clients, IGST for other states — with the Place of Supply printed on the invoice, instead of a single flat "GST" line.',
     'Refreshed the look across the app: cleaner card borders, a redesigned filter bar, a denser task table, a themed scrollbar, smoother animations, and clearer tooltips.',
@@ -221,7 +229,7 @@ function setupActivationListeners() {
 async function loadInitialData() {
   const profile = await getJson('http://localhost:3000/profile');
   if (!profile.firm_name) return showView('onboarding-view');
-  state.firm = { name: profile.firm_name, partner: profile.partner_name, phone: profile.phone, email: profile.email, gstn: profile.gstn, upi_id: profile.upi_id, logo: profile.logo, bank_name: profile.bank_name, bank_account: profile.bank_account, bank_ifsc: profile.bank_ifsc, org_address: profile.org_address, bank_address: profile.bank_address };
+  state.firm = { name: profile.firm_name, partner: profile.partner_name, phone: profile.phone, email: profile.email, gstn: profile.gstn, upi_id: profile.upi_id, logo: profile.logo, bank_name: profile.bank_name, bank_account: profile.bank_account, bank_ifsc: profile.bank_ifsc, org_address: profile.org_address, bank_address: profile.bank_address, smtp_host: profile.smtp_host, smtp_port: profile.smtp_port, smtp_user: profile.smtp_user, smtp_pass: profile.smtp_pass, smtp_secure: profile.smtp_secure };
   await Promise.all([fetchTasks(), fetchClients(), populateDashboardCompanySelect()]);
   updateDashboardInfo();
   showView('dashboard-view');
@@ -337,11 +345,18 @@ function setupEventListeners() {
     e.preventDefault();
     const logoInput = document.getElementById('logo');
     const save = async (logo) => {
-      await fetch('http://localhost:3000/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firm_name: document.getElementById('firm_name').value, partner_name: document.getElementById('partner_name').value, phone: document.getElementById('phone').value, email: document.getElementById('email').value, gstn: document.getElementById('gstn').value, upi_id: document.getElementById('upi_id_setup').value, logo, org_address: document.getElementById('org_address').value, bank_name: document.getElementById('bank_name').value, bank_account: document.getElementById('bank_account').value, bank_ifsc: document.getElementById('bank_ifsc').value, bank_address: document.getElementById('bank_address').value }) });
+      await fetch('http://localhost:3000/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firm_name: document.getElementById('firm_name').value, partner_name: document.getElementById('partner_name').value, phone: document.getElementById('phone').value, email: document.getElementById('email').value, gstn: document.getElementById('gstn').value, upi_id: document.getElementById('upi_id_setup').value, logo, org_address: document.getElementById('org_address').value, bank_name: document.getElementById('bank_name').value, bank_account: document.getElementById('bank_account').value, bank_ifsc: document.getElementById('bank_ifsc').value, bank_address: document.getElementById('bank_address').value, smtp_host: document.getElementById('smtp_host').value, smtp_port: document.getElementById('smtp_port').value, smtp_user: document.getElementById('smtp_user').value, smtp_pass: document.getElementById('smtp_pass').value, smtp_secure: document.getElementById('smtp_secure').checked ? '1' : '0' }) });
       await loadInitialData();
     };
     if (logoInput.files && logoInput.files[0]) { const reader = new FileReader(); reader.onload = (ev) => save(ev.target.result); reader.readAsDataURL(logoInput.files[0]); } else await save(state.firm?.logo || '');
   }));
+  document.getElementById('logo')?.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => renderLogoPreview(ev.target.result);
+    reader.readAsDataURL(file);
+  });
   document.getElementById('task-form')?.addEventListener('submit', withSubmitLoading(saveTask));
   document.getElementById('client-form')?.addEventListener('submit', withSubmitLoading(saveClient));
   document.getElementById('company-form')?.addEventListener('submit', withSubmitLoading(saveNewCompany));
@@ -424,7 +439,43 @@ function handleKeyboardShortcuts(e) {
     default: break;
   }
 }
-function showHelpView() { showView('help-view'); setActiveNav('help'); }
+function showHelpView() { showView('help-view'); setActiveNav('help'); loadDataLocation(); }
+async function loadDataLocation() {
+  const currentEl = document.getElementById('data-location-current');
+  if (!currentEl) return;
+  try {
+    const data = await getJson('http://localhost:3000/data-location');
+    currentEl.value = data.currentPath || '';
+    const input = document.getElementById('data-location-input');
+    if (input) input.disabled = !data.isPackagedApp;
+    const saveBtn = document.querySelector('button[onclick="saveDataLocation()"]');
+    if (saveBtn) saveBtn.disabled = !data.isPackagedApp;
+    const status = document.getElementById('data-location-status');
+    if (status && !data.isPackagedApp) { status.innerText = 'Only changeable in the installed app, not in local dev/testing.'; status.classList.remove('hidden'); }
+    const suggestWrap = document.getElementById('data-location-suggestions');
+    if (suggestWrap) {
+      if (data.suggestions && data.suggestions.length) {
+        suggestWrap.innerHTML = data.suggestions.map((s) => `<button type="button" class="btn btn-outline btn-sm" data-path="${escapeHtml(s.path)}" onclick="document.getElementById('data-location-input').value=this.dataset.path">Use ${escapeHtml(s.label)}</button>`).join('');
+        suggestWrap.classList.remove('hidden');
+      } else {
+        suggestWrap.classList.add('hidden');
+      }
+    }
+  } catch { /* non-fatal — current path just stays blank */ }
+}
+async function saveDataLocation() {
+  const input = document.getElementById('data-location-input');
+  const newPath = input.value.trim();
+  if (!newPath) return showToast('Enter a folder path first.', 'error');
+  if (!window.confirm(`Move your data to:\n\n${newPath}\n\nThe app will restart to apply this. Make sure this folder isn't open on any other device at the same time.`)) return;
+  try {
+    const result = await requestJson('http://localhost:3000/data-location', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: newPath }) }, { title: 'Moving data...', message: 'Relocating your company data to the new folder.' });
+    if (result.restartRequired) {
+      if (window.appControl) window.appControl.relaunch();
+      else { showToast('Saved. Please close and reopen the app to finish.', 'success'); }
+    }
+  } catch (error) { showToast(error.message, 'error'); }
+}
 // --- Auto-update UI --------------------------------------------------------
 // window.updater is exposed by preload.js via contextBridge; it only exists
 // inside the Electron shell, so every call here is guarded.
@@ -448,13 +499,22 @@ function checkForNewVersionChangelog(currentVersion) {
   if (!lastSeen || lastSeen === currentVersion) return;
   showWhatsNewModal();
 }
+// A changelog note is either a plain string (legacy entries — always shown, so past
+// versions render exactly as before) or { text, visible } so future entries can include
+// internal/dev-only notes that never reach the What's New popup. visible defaults to
+// true — only an explicit `visible:false` hides a note.
+function noteText(note) { return typeof note === 'string' ? note : note.text; }
+function noteVisible(note) { return typeof note === 'string' ? true : note.visible !== false; }
 function renderChangelogBody(entries) {
   const body = document.getElementById('whats-new-body');
   if (!body) return;
-  body.innerHTML = entries.map((entry) => `
+  const visibleEntries = entries
+    .map((entry) => ({ version: entry.version, notes: entry.notes.filter(noteVisible) }))
+    .filter((entry) => entry.notes.length);
+  body.innerHTML = visibleEntries.map((entry) => `
     <div class="changelog-entry">
       <h4>Version ${escapeHtml(entry.version)}</h4>
-      <ul class="help-list">${entry.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}</ul>
+      <ul class="help-list">${entry.notes.map((note) => `<li>${escapeHtml(noteText(note))}</li>`).join('')}</ul>
     </div>`).join('');
 }
 function showWhatsNewModal() {
@@ -506,7 +566,22 @@ function restartAndUpdate() {
   window.updater.restartAndInstall();
 }
 function updateDashboardInfo() { document.getElementById('display-firm-name').innerText = state.firm.name; document.getElementById('display-partner-name').innerText = `Owner: ${state.firm.partner}`; }
-function showSettings() { document.getElementById('firm_name').value = state.firm.name || ''; document.getElementById('partner_name').value = state.firm.partner || ''; document.getElementById('phone').value = state.firm.phone || ''; document.getElementById('email').value = state.firm.email || ''; document.getElementById('gstn').value = state.firm.gstn || ''; document.getElementById('upi_id_setup').value = state.firm.upi_id || ''; document.getElementById('org_address').value = state.firm.org_address || ''; document.getElementById('bank_name').value = state.firm.bank_name || ''; document.getElementById('bank_account').value = state.firm.bank_account || ''; document.getElementById('bank_ifsc').value = state.firm.bank_ifsc || ''; document.getElementById('bank_address').value = state.firm.bank_address || ''; showView('onboarding-view'); setActiveNav('settings'); }
+function showSettings() { document.getElementById('firm_name').value = state.firm.name || ''; document.getElementById('partner_name').value = state.firm.partner || ''; document.getElementById('phone').value = state.firm.phone || ''; document.getElementById('email').value = state.firm.email || ''; document.getElementById('gstn').value = state.firm.gstn || ''; document.getElementById('upi_id_setup').value = state.firm.upi_id || ''; document.getElementById('org_address').value = state.firm.org_address || ''; document.getElementById('bank_name').value = state.firm.bank_name || ''; document.getElementById('bank_account').value = state.firm.bank_account || ''; document.getElementById('bank_ifsc').value = state.firm.bank_ifsc || ''; document.getElementById('bank_address').value = state.firm.bank_address || ''; document.getElementById('smtp_host').value = state.firm.smtp_host || ''; document.getElementById('smtp_port').value = state.firm.smtp_port || '465'; document.getElementById('smtp_user').value = state.firm.smtp_user || ''; document.getElementById('smtp_pass').value = state.firm.smtp_pass || ''; document.getElementById('smtp_secure').checked = state.firm.smtp_secure !== '0'; document.getElementById('smtp-test-status').innerText = ''; renderLogoPreview(state.firm.logo || ''); showView('onboarding-view'); setActiveNav('settings'); }
+function renderLogoPreview(dataUrl) {
+  const preview = document.getElementById('logo-preview');
+  if (!preview) return;
+  preview.innerHTML = dataUrl ? `<img src="${dataUrl}" alt="Organisation logo preview">` : '';
+}
+async function testSmtpConnection() {
+  const status = document.getElementById('smtp-test-status');
+  status.innerText = 'Testing...';
+  try {
+    await requestJson('http://localhost:3000/test-smtp', { method: 'POST' }, { title: 'Testing email connection...', message: 'Verifying your SMTP settings.' });
+    status.innerText = '✓ Connected successfully.';
+  } catch (error) {
+    status.innerText = `✗ ${error.message}`;
+  }
+}
 function updateClientSelects() { const select = document.getElementById('client_select'); while (select.options.length > 2) select.remove(2); state.clients.forEach((client) => { const option = document.createElement('option'); option.value = client.name; option.innerText = client.name; select.appendChild(option); }); resetSelectSearch('client_select'); }
 function showClientsView() { fetchClients(); showView('clients-view'); setActiveNav('clients'); }
 function showReportsView() {
@@ -515,6 +590,7 @@ function showReportsView() {
   while (select.options.length > 1) select.remove(1);
   state.clients.forEach((client) => { const option = document.createElement('option'); option.value = client.name; option.innerText = client.name; select.appendChild(option); });
   select.value = current;
+  resetSelectSearch('report-client');
   populateReportFYSelect();
   showView('reports-view');
   setActiveNav('reports');
@@ -1309,6 +1385,23 @@ async function batchProcess(action) {
       await requestJson('http://localhost:3000/generate-invoice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskIds: ids, paymentDisplay }) }, { title: 'Generating invoices...', message: 'Validating selection and preparing invoice PDF.' });
       await fetchTasks();
       showToast('Invoice generation completed.');
+    } catch (error) {
+      showToast(error.message, 'error');
+      return;
+    }
+  } else if (action === 'email') {
+    const tasks = ids.map((id) => { const task = state.tasks.find((item) => item.id === id); const client = state.clients.find((entry) => entry.name === task.clientName); return { ...task, email: client?.email || '' }; });
+    const pendingTasks = tasks.filter((task) => task.status !== 'Invoice Generated');
+    if (pendingTasks.length) {
+      flashTaskRows(pendingTasks.map((task) => task.id));
+      showToast('Only generated invoices can be emailed.', 'error');
+      return;
+    }
+    try {
+      const data = await requestJson('http://localhost:3000/send-invoice-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tasks }) }, { title: 'Sending invoice emails...', message: 'Emailing the selected invoices to your clients.' });
+      const failed = (data.results || []).filter((r) => !r.success);
+      if (data.sentCount) showToast(`Emailed ${data.sentCount} invoice${data.sentCount === 1 ? '' : 's'}.`);
+      if (failed.length) showToast(`${failed.length} failed: ${failed.map((f) => `${f.client} (${f.error})`).join('; ')}`, 'error');
     } catch (error) {
       showToast(error.message, 'error');
       return;

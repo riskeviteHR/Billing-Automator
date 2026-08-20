@@ -164,6 +164,9 @@ ipcMain.handle('updates:check', async () => {
 ipcMain.on('updates:restart-install', () => {
   if (app.isPackaged && autoUpdater) autoUpdater.quitAndInstall();
 });
+// Plain restart (not an update install) — used after changing the data location, so the
+// server picks up the new path on its next startup.
+ipcMain.on('app:relaunch', () => { app.relaunch(); app.exit(); });
 
 // Focus existing window if a second instance tries to launch
 app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });

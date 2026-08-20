@@ -107,6 +107,13 @@
             <div class="form-group"><label>Bank Account Number</label><input type="text" id="bank_account" placeholder="Account number"></div>
             <div class="form-group"><label>Bank IFSC Code</label><input type="text" id="bank_ifsc" placeholder="e.g. SBIN0001234"></div>
             <div class="form-group full"><label>Bank Address (optional)</label><input type="text" id="bank_address" placeholder="e.g. Branch address"></div>
+            <div class="form-group full"><label>Email Sending (SMTP) — optional, needed to send invoices by email</label></div>
+            <div class="form-group"><label>SMTP Host</label><input type="text" id="smtp_host" placeholder="e.g. smtp.gmail.com"></div>
+            <div class="form-group"><label>SMTP Port</label><input type="number" id="smtp_port" placeholder="465"></div>
+            <div class="form-group"><label>SMTP Username (email address)</label><input type="text" id="smtp_user" placeholder="you@yourfirm.com" autocomplete="off"></div>
+            <div class="form-group"><label>SMTP Password / App Password</label><input type="password" id="smtp_pass" placeholder="•••••••••••" autocomplete="new-password"></div>
+            <div class="form-group full"><label class="switch-label" style="font-weight:400;">Use SSL/TLS (secure connection — usually on for port 465)<label class="switch"><input type="checkbox" id="smtp_secure" checked><span class="slider round"></span></label></label></div>
+            <div class="form-group full"><button type="button" class="btn btn-outline btn-sm" onclick="testSmtpConnection()">Test Email Connection</button> <span id="smtp-test-status" class="subtle"></span></div>
             <div class="form-group full"><label>Organisation Logo</label><input type="file" id="logo" accept="image/*"><div id="logo-preview"></div></div>
           </div>
           <button type="submit" class="btn btn-primary">Save & Continue</button>
@@ -154,7 +161,7 @@
         <div class="glass-card">
           <div class="table-header-flex">
             <div><h3>Task Dashboard</h3><p class="subtle">Tasks stay pending until invoice generation is triggered.</p></div>
-            <div class="toolbar compact"><button class="btn btn-outline btn-batch-generate" onclick="batchProcess('generate')">Generate Selected</button><button class="btn btn-outline" onclick="batchProcessSeparate()">Generate Separate</button><button class="btn btn-outline btn-batch-send" onclick="batchProcess('send')">Invoice <svg viewBox="0 0 24 24" width="18" height="18" fill="#25D366" aria-hidden="true" focusable="false"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 0 0 1.51 5.26l-.999 3.648 3.978-1.99zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg></button><button class="btn btn-outline btn-batch-reminder" onclick="batchProcess('reminder')">Reminder <svg viewBox="0 0 24 24" width="18" height="18" fill="#25D366" aria-hidden="true" focusable="false"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 0 0 1.51 5.26l-.999 3.648 3.978-1.99zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg></button></div>
+            <div class="toolbar compact"><button class="btn btn-outline btn-batch-generate" onclick="batchProcess('generate')">Generate Selected</button><button class="btn btn-outline" onclick="batchProcessSeparate()">Generate Separate</button><button class="btn btn-outline btn-batch-send" onclick="batchProcess('send')">Invoice <svg viewBox="0 0 24 24" width="18" height="18" fill="#25D366" aria-hidden="true" focusable="false"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 0 0 1.51 5.26l-.999 3.648 3.978-1.99zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg></button><button class="btn btn-outline btn-batch-reminder" onclick="batchProcess('reminder')">Reminder <svg viewBox="0 0 24 24" width="18" height="18" fill="#25D366" aria-hidden="true" focusable="false"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 0 0 1.51 5.26l-.999 3.648 3.978-1.99zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg></button><button class="btn btn-outline btn-batch-email" onclick="batchProcess('email')" title="Send selected generated invoices by email">Email <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg></button></div>
           </div>
           <div class="filter-bar">
             <div class="filter-search-wrap">
@@ -202,7 +209,13 @@
           <label>Financial Year <select id="report-fy" onchange="applyReportFYFilter(this.value)"><option value="">All Years</option></select></label>
           <label>From <input type="hidden" id="report-from" onchange="runReport()"><input type="text" id="report-from_display" class="date-input" placeholder="dd-mm-yyyy" autocomplete="off" onfocus="openDatePicker('report-from')" oninput="handleDateTyped('report-from', this.value)" onblur="handleDateBlur('report-from')"></label>
           <label>To <input type="hidden" id="report-to" onchange="runReport()"><input type="text" id="report-to_display" class="date-input" placeholder="dd-mm-yyyy" autocomplete="off" onfocus="openDatePicker('report-to')" oninput="handleDateTyped('report-to', this.value)" onblur="handleDateBlur('report-to')"></label>
-          <span id="report-client-wrap" class="hidden"><label>Client <select id="report-client" onchange="runReport()"><option value="">-- Select Client --</option></select></label></span>
+          <span id="report-client-wrap" class="hidden"><label>Client
+            <div class="searchable-select report-client-select">
+              <input type="text" class="searchable-select-search" placeholder="Search clients..." autocomplete="off" oninput="filterSelectOptions('report-client', this.value)" onfocus="filterSelectOptions('report-client', this.value)" onkeydown="comboKeydown(event, 'report-client')">
+              <div class="combo-list hidden" data-select="report-client" onmousedown="handleComboMousedown(event)"></div>
+              <select id="report-client" onchange="runReport()"><option value="">-- Select Client --</option></select>
+            </div>
+          </label></span>
           <button type="button" class="btn btn-outline" onclick="downloadReport('xlsx')">Download Excel</button>
           <button type="button" class="btn btn-outline" onclick="downloadReport('pdf')">Download PDF</button>
           <button type="button" id="report-tally-btn" class="btn btn-outline" onclick="downloadReport('tally')">Export to Tally (XML)</button>
@@ -280,6 +293,17 @@
         </div>
       </div>
       <div class="glass-card help-card">
+        <h3>Data Location</h3>
+        <p class="subtle">Where your companies, clients, invoices and vouchers are stored. Point this at a folder synced by OneDrive, Google Drive, or any similar service to use the same data from more than one computer — just make sure the app is only open on <strong>one machine at a time</strong>, or you risk lost changes.</p>
+        <div class="form-group full" style="margin-top:14px;"><label>Current location</label><input type="text" id="data-location-current" readonly class="readonly-input"></div>
+        <div class="form-group full"><label>New location</label><input type="text" id="data-location-input" placeholder="e.g. C:\Users\you\OneDrive\Invoices Utility"></div>
+        <div id="data-location-suggestions" class="toolbar compact hidden" style="margin-top:2px;justify-content:flex-start;"></div>
+        <div class="toolbar compact" style="margin-top:10px;justify-content:flex-start;">
+          <button type="button" class="btn btn-primary" onclick="saveDataLocation()">Save &amp; Restart</button>
+        </div>
+        <p id="data-location-status" class="subtle hidden"></p>
+      </div>
+      <div class="glass-card help-card">
         <h3>Support &amp; Feedback</h3>
         <p>Have a question, found a bug, or want to request a feature? Reach out directly — we usually respond quickly.</p>
         <div class="toolbar compact" style="margin-top:14px;">
@@ -289,22 +313,28 @@
       </div>
       <div class="glass-card help-card">
         <h3>What this software does</h3>
-        <p>A local, offline invoicing &amp; accounting tool for CAs and small firms. Everything is saved on this computer under <strong>Desktop → Invoices Utility</strong>; nothing is uploaded to the cloud. You can run multiple companies, each with its own isolated data.</p>
+        <p>A local, offline invoicing &amp; accounting tool for CAs and small firms. By default your data is saved on this computer under <strong>Desktop → Invoices Utility</strong>; nothing is uploaded to the cloud. You can point that folder anywhere — including a OneDrive/Google Drive-synced folder to share one data set across devices — from <em>Data Location</em> above. You can run multiple companies, each with its own isolated data.</p>
         <h3>Getting started</h3>
         <ul class="help-list">
-          <li><strong>Login:</strong> the app is protected by a passkey (default <code>admin123</code>) — change it from <em>Change Passkey</em> in the sidebar.</li>
-          <li><strong>Companies:</strong> create and switch between firms; each keeps separate clients, invoices, vouchers and reports.</li>
+          <li><strong>Login:</strong> the app is protected by a passkey — change it from <em>Change Passkey</em> in the sidebar.</li>
+          <li><strong>Home:</strong> the <em>Home</em> button in the sidebar always takes you back to the main task dashboard from anywhere in the app.</li>
+          <li><strong>Companies:</strong> create and switch between firms; each keeps separate clients, invoices, vouchers, reports, and its own invoice numbering series.</li>
           <li><strong>Clients:</strong> add parties with name, contact, GSTIN, and mandatory City &amp; Pincode.</li>
         </ul>
         <h3>Day-to-day work</h3>
         <ul class="help-list">
           <li><strong>Tasks &amp; Invoices:</strong> add a task (client + line items), then <em>Generate</em> its invoice. Primary Bills (GST) and Secondary Bills (Non-GST) use separate numbering series (switch between them from the Bills dropdown in the sidebar). Use <em>Generate Separate</em> to make one invoice per selected row.</li>
+          <li><strong>GST breakdown:</strong> GST invoices automatically show <strong>CGST + SGST</strong> when your client is in the same state as you, or <strong>IGST</strong> when they're in a different state — detected from GSTINs (or the client's city/pincode as a fallback) and printed with the Place of Supply, per GST invoicing rules.</li>
+          <li><strong>Invoice branding:</strong> your organisation logo, address, GSTIN, and bank details all appear on generated invoices automatically once set in Settings.</li>
+          <li><strong>Emailing invoices:</strong> select one or more generated invoices on the dashboard and click <em>Email</em> to send them straight to the client's inbox with the PDF attached. Set up your SMTP host/username/password in Settings first — the <em>Test Email Connection</em> button there confirms it's working before you rely on it.</li>
+          <li><strong>Task actions:</strong> each row keeps <em>Generate/Re-generate</em>, <em>View</em>, and <em>Download</em> visible; less-frequent actions — Edit, Receipt Entry, Cancel Invoice, Delete — live under the <strong>⋮ More</strong> menu.</li>
           <li><strong>Receipt Entry / Vouchers:</strong> record payments against an invoice, or as an on-account advance. Extra money auto-adjusts to the party's other pending invoices, then becomes an advance.</li>
-          <li><strong>Reports:</strong> Sales, Outstanding, Party Ledger, Primary &amp; Secondary Bills — view on screen or download as Excel, PDF, or <strong>Tally XML</strong>.</li>
+          <li><strong>Reports:</strong> Sales, Outstanding, Party Ledger (with a searchable client picker), Primary &amp; Secondary Bills — view on screen or download as Excel, PDF, or <strong>Tally XML</strong>.</li>
+          <li><strong>Dashboard insights:</strong> quick trend chips under the stats bar show this month's task count and revenue against last month's.</li>
           <li><strong>Auto Reminders:</strong> fully automatic — the first WhatsApp payment reminder sends 3 days after an invoice's due date, then repeats every 3 days until it's paid. Turn it off globally, per client, or per invoice any time; reminders stop the moment an invoice is marked paid. Runs on a backend schedule, so it keeps working even when the app is minimized or closed.</li>
-          <li><strong>Settings:</strong> click the gear icon on the dashboard (next to the reminders bell) to edit your organisation details.</li>
+          <li><strong>Settings:</strong> click the gear icon on the dashboard (next to the reminders bell) to edit your organisation details, addresses, bank details, logo, and email (SMTP) setup.</li>
           <li><strong>Bulk Upload:</strong> import many tasks at once from an Excel template.</li>
-          <li><strong>Delete:</strong> remove a task, client, or voucher — you'll always be asked to confirm. A client with existing tasks can't be deleted until its tasks are removed; deleting a voucher reverses the payment it applied.</li>
+          <li><strong>Delete:</strong> remove a task, client, or voucher — you'll always be asked to confirm. A client with existing tasks can't be deleted until its tasks are removed; deleting a voucher reverses the payment it applied. Note that deleting an already-invoiced task permanently retires its invoice number — use <em>Cancel Invoice</em> instead if you want the gap explained in your records.</li>
           <li><strong>Dark mode:</strong> toggle from the top of the sidebar.</li>
         </ul>
         <h3>Keyboard shortcuts</h3>
